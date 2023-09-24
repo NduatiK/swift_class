@@ -101,7 +101,7 @@ defmodule SwiftClassTest do
     end
 
     test "parses key/value pairs" do
-      input = ~s|foo(bar: "baz", qux: "quux")|
+      input = ~s|foo(bar: "baz", qux: :quux")|
       output = [["foo", [["bar", "baz"], ["qux", "quux"]], nil]]
 
       assert parse(input) == output
