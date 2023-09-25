@@ -48,11 +48,31 @@ defmodule SwiftClassTest do
       assert parse(input) == output
     end
 
-    test "parses single modifier with atom" do
+    test "parses single modifier with atom as IME" do
       input = "font(:largeTitle)"
 
       output = [
-        ["font", [["IME", "largeTitle"]], nil]
+        ["font", ["largeTitle"], nil]
+      ]
+
+      assert parse(input) == output
+    end
+
+    test "parses chained IMEs" do
+      input = "font({:Color, :red})"
+
+      output = [
+        ["font", [["Color", "red"]]]
+      ]
+
+      assert parse(input) == output
+    end
+
+    test "parses chained IMEs within the content block" do
+      input = "background() { {:Color, :red} }"
+
+      output = [
+        ["background", [], [["Color", "red"]]
       ]
 
       assert parse(input) == output
@@ -62,7 +82,7 @@ defmodule SwiftClassTest do
       input = "font(:largeTitle) bold(true) italic(true)"
 
       output = [
-        ["font", [["IME", "largeTitle"]], nil],
+        ["font", ["largeTitle"], nil],
         ["bold", [true], nil],
         ["italic", [true], nil]
       ]
@@ -78,7 +98,7 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        ["font", [["IME", "largeTitle"]], nil],
+        ["font", ["largeTitle"], nil],
         ["bold", [true], nil],
         ["italic", [true], nil]
       ]
@@ -116,7 +136,7 @@ defmodule SwiftClassTest do
 
     test "parses Implicit Member Expressions" do
       input = "color(:red)"
-      output = [["color", [["IME", "red"]], nil]]
+      output = [["color", ["red"], nil]]
 
       assert parse(input) == output
     end
@@ -130,7 +150,7 @@ defmodule SwiftClassTest do
 
     test "parses attr value references" do
       input = ~s|foo(attr("bar"))|
-      output = [["foo", [["Attr", "bar"]], nil]]
+      output = [["foo", [["__attr__", "bar"]], nil]]
 
       assert parse(input) == output
     end
@@ -149,8 +169,8 @@ defmodule SwiftClassTest do
         {
           "red-header",
           [
-            ["color", [["IME", "red"]], nil],
-            ["font", [["IME", "largeTitle"]], nil]
+            ["color", ["red"], nil],
+            ["font", ["largeTitle"], nil]
           ]
         }
       ]
@@ -219,7 +239,7 @@ defmodule SwiftClassTest do
         {
           "color-red",
           [
-            ["color", [["IME", "red"]], nil]
+            ["color", ["red"], nil]
           ]
         }
       ]
