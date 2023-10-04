@@ -221,7 +221,7 @@ defmodule SwiftClassTest do
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
          [
           {:foo, [], [true]},
-          {:color, [], [{Elixir, [], :color_name}]},
+          {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
           {:bar, [], [false]},
          ]}
       ]
@@ -239,7 +239,7 @@ defmodule SwiftClassTest do
       output = [
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
          [
-          {:color, [], [{Elixir, [], :color}]}
+          {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
          ]}
       ]
 
@@ -263,7 +263,7 @@ defmodule SwiftClassTest do
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
          [
           {:foo, [], [true]},
-          {:color, [], [{Elixir, [], :color_name}]},
+          {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
           {:bar, [], [false]}
          ]},
         {
@@ -322,7 +322,7 @@ defmodule SwiftClassTest do
     test "snake_case" do
       input = "font(family: snake_case(family))"
 
-      output = {:font, [], [{Elixir, [], {:snake_case, [], [{:family, [], Elixir}]}}]}
+      output = {:font, [], [[family: {Elixir, [], {:snake_case, [], [{:family, [], Elixir}]}}]]}
 
       assert parse(input) == output
     end
