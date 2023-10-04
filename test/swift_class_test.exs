@@ -87,9 +87,9 @@ defmodule SwiftClassTest do
 
       input = "font(color: Color.red.shadow(.thick))"
 
-      assert parse(input) == output
-
       output = {:font, [], [[color: {:., [], [:Color, {:., [], [:red, {:shadow, [], [{:., [], [nil, :thick]}]}]}]}]]}
+
+      assert parse(input) == output
     end
 
     test "parses chained IMEs within the content block" do
