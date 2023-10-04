@@ -112,6 +112,14 @@ defmodule SwiftClassTest do
       assert parse(input) == output
     end
 
+    test "parses complex modifier chains" do
+      input = "color(color: .foo.bar.baz(1, 2).qux)"
+
+      output = {:color, [], [[color: {:., [], [nil, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, {:., [], [:qux]}]}]}]}]]}
+
+      assert parse(input) == output
+    end
+
     test "parses multiline" do
       input = """
       font(.largeTitle)
