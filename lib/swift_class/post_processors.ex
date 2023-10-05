@@ -49,35 +49,12 @@ defmodule SwiftClass.PostProcessors do
     {rest, [{String.to_atom(variable_name), [], args}], context}
   end
 
-  def to_scoped_ime_ast(
-        rest,
-        [[] = _args, variable_name, scope],
-        context,
-        _line,
-        _offset,
-        _is_initial = true
-      ) do
+  def to_scoped_ime_ast(rest, [[] = _args, variable_name, scope], context, _line, _offset) do
     {rest, [String.to_atom(variable_name), String.to_atom(scope)], context}
   end
 
-  def to_scoped_ime_ast(
-        rest,
-        [args, variable_name, scope],
-        context,
-        _line,
-        _offset,
-        _is_initial = true
-      ) do
+  def to_scoped_ime_ast(rest, [args, variable_name, scope], context, _line, _offset) do
     {rest, [{String.to_atom(variable_name), [], args}, String.to_atom(scope)], context}
-  end
-
-  def to_scoped_ime_ast(rest, [[] = _args, variable_name, scope], context, _line, _offset, false) do
-    {rest, [{:., [], [String.to_atom(scope), String.to_atom(variable_name)]}], context}
-  end
-
-  def to_scoped_ime_ast(rest, [args, variable_name, scope], context, _line, _offset, false) do
-    {rest, [{:., [], [String.to_atom(scope), {String.to_atom(variable_name), [], args}]}],
-     context}
   end
 
   defp combine_chain_ast_parts({:., [], [nil, atom]}, inner) when is_atom(atom) do

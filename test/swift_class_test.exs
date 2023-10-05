@@ -48,6 +48,7 @@ defmodule SwiftClassTest do
         :content2
       }
       """
+
       assert parse(input) == output
     end
 
@@ -87,7 +88,9 @@ defmodule SwiftClassTest do
 
       input = "font(color: Color.red.shadow(.thick))"
 
-      output = {:font, [], [[color: {:., [], [:Color, {:., [], [:red, {:shadow, [], [{:., [], [nil, :thick]}]}]}]}]]}
+      output =
+        {:font, [],
+         [[color: {:., [], [:Color, {:., [], [:red, {:shadow, [], [{:., [], [nil, :thick]}]}]}]}]]}
 
       assert parse(input) == output
     end
@@ -115,7 +118,15 @@ defmodule SwiftClassTest do
     test "parses complex modifier chains" do
       input = "color(color: .foo.bar.baz(1, 2).qux)"
 
-      output = {:color, [], [[color: {:., [], [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, :qux]}]}]}]}]]}
+      output =
+        {:color, [],
+         [
+           [
+             color:
+               {:., [],
+                [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, :qux]}]}]}]}
+           ]
+         ]}
 
       assert parse(input) == output
     end
@@ -220,9 +231,9 @@ defmodule SwiftClassTest do
       output = [
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
          [
-          {:foo, [], [true]},
-          {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
-          {:bar, [], [false]},
+           {:foo, [], [true]},
+           {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
+           {:bar, [], [false]}
          ]}
       ]
 
@@ -239,7 +250,7 @@ defmodule SwiftClassTest do
       output = [
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
          [
-          {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
+           {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
          ]}
       ]
 
@@ -262,9 +273,9 @@ defmodule SwiftClassTest do
       output = [
         {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
          [
-          {:foo, [], [true]},
-          {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
-          {:bar, [], [false]}
+           {:foo, [], [true]},
+           {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
+           {:bar, [], [false]}
          ]},
         {
           "color-red",
@@ -298,7 +309,8 @@ defmodule SwiftClassTest do
     test "to_float" do
       input = "kerning(kerning: to_float(kerning))"
 
-      output = {:kerning, [], [[kerning: {Elixir, [], {:to_float, [], [{:kerning, [], Elixir}]}}]]}
+      output =
+        {:kerning, [], [[kerning: {Elixir, [], {:to_float, [], [{:kerning, [], Elixir}]}}]]}
 
       assert parse(input) == output
     end

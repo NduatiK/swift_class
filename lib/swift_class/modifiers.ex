@@ -40,42 +40,34 @@ defmodule SwiftClass.Modifiers do
   )
 
   # .red
-  implicit_ime = fn is_inital ->
+  implicit_ime = fn is_initial ->
     ignore(string("."))
     |> concat(word())
     |> wrap(optional(parsec(:brackets)))
-    |> post_traverse({:to_implicit_ime_ast, [is_inital]})
+    |> post_traverse({:to_implicit_ime_ast, [is_initial]})
   end
 
   # .fontSize
-  scoped_ime = fn is_inital ->
+  scoped_ime =
     word()
     |> ignore(string("."))
     |> concat(word())
     |> wrap(optional(parsec(:brackets)))
-    |> post_traverse({:to_scoped_ime_ast, [is_inital]})
-  end
+    |> post_traverse({:to_scoped_ime_ast, []})
 
   defparsec(
     :ime,
     choice([
       # Scoped
       # Color.red
-      scoped_ime.(true),
+      scoped_ime,
       # Implicit
       # .red
       implicit_ime.(true)
     ])
     |> repeat(
-      choice([
-        # Scoped
-        # Color.red
-        scoped_ime.(false),
-        # Implicit
-        # .red
-        implicit_ime.(false)
-      ]),
-      min: 1
+      # <other_ime>.red
+      implicit_ime.(false)
     )
     |> post_traverse({:chain_ast, []})
   )
