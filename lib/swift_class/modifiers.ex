@@ -33,7 +33,8 @@ defmodule SwiftClass.Modifiers do
     bracketed("[", parsec(:key_value_pairs), "]")
   )
 
-  # .red
+  # .baz
+  # .baz(0.1)
   implicit_ime = fn is_initial ->
     ignore(string("."))
     |> concat(word())
@@ -41,9 +42,10 @@ defmodule SwiftClass.Modifiers do
     |> post_traverse({:to_implicit_ime_ast, [is_initial]})
   end
 
-  # .fontSize
+  # Foo.bar
+  # Foo.baz(0.1)
   scoped_ime =
-    word()
+    module_name()
     |> ignore(string("."))
     |> concat(word())
     |> wrap(optional(parsec(:brackets)))

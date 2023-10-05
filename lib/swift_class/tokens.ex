@@ -133,12 +133,11 @@ defmodule SwiftClass.Tokens do
     ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
   end
 
-  # def module_name() do
-  #   ascii_string([?A..?Z], 1)
-  #   |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
-  #   |> reduce({Enum, :join, [""]})
-  #   |> map({String, :to_atom, []})
-  # end
+  def module_name() do
+    ascii_string([?A..?Z], 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+    |> reduce({Enum, :join, [""]})
+  end
 
   def bracketed(start \\ empty(), open, combinator, close) do
     start
