@@ -140,11 +140,22 @@ defmodule SwiftClass.Tokens do
   #   |> map({String, :to_atom, []})
   # end
 
+  def bracketed(start \\ empty(), open, combinator, close) do
+    start
+    |> ignore_whitespace()
+    |> ignore(string(open))
+    |> ignore_whitespace()
+    |> concat(combinator)
+    |> ignore_whitespace()
+    |> ignore(string(close))
+    |> ignore_whitespace()
+  end
+
   #
   # Collections
   #
 
-  def comma_separated_list(combinator, elem_combinator) do
+  def comma_separated_list(combinator \\ empty(), elem_combinator) do
     delimiter_separated_list(combinator, elem_combinator, ",", true)
   end
 

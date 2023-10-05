@@ -30,13 +30,7 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :key_value_list,
-    ignore_whitespace()
-    |> ignore(string("["))
-    |> ignore_whitespace()
-    |> parsec(:key_value_pairs)
-    |> ignore_whitespace()
-    |> ignore(string("]"))
-    |> ignore_whitespace()
+    bracketed("[", parsec(:key_value_pairs), "]")
   )
 
   # .red
@@ -81,13 +75,10 @@ defmodule SwiftClass.Modifiers do
       |> post_traverse({:to_attr_ast, []}),
       #
       helper_function()
-      |> ignore(string("("))
-      |> ignore_whitespace()
-      |> concat(quoted_variable())
-      |> ignore_whitespace()
-      |> ignore(string(")"))
+      |> bracketed("(", quoted_variable(), ")")
       |> post_traverse({:to_function_call_ast, []})
       |> post_traverse({:tag_as_elixir_code, []}),
+      #
       word()
       |> parsec(:brackets)
       |> post_traverse({:to_function_call_ast, []})
@@ -104,11 +95,7 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :brackets,
-    ignore_whitespace()
-    |> ignore(string("("))
-    |> ignore_whitespace()
-    |> comma_separated_list(choice(@bracket_child))
-    |> ignore(string(")"))
+    bracketed("(", comma_separated_list(choice(@bracket_child)), ")")
   )
 
   defparsec(
@@ -130,16 +117,10 @@ defmodule SwiftClass.Modifiers do
   )
 
   content =
-    ignore_whitespace()
-    |> ignore(string("{"))
-    |> ignore_whitespace()
-    |> concat(
+    bracketed(
+      "{",
       choice([
-        ignore_whitespace()
-        |> ignore(string("["))
-        |> ignore_whitespace()
-        |> comma_separated_list(choice(@bracket_child))
-        |> ignore(string("]")),
+        bracketed("[", comma_separated_list(choice(@bracket_child)), "]"),
         #
         newline_separated_list(choice(@bracket_child)),
         #
@@ -147,11 +128,10 @@ defmodule SwiftClass.Modifiers do
         |> choice(@bracket_child)
         |> ignore_whitespace()
       ])
+      |> post_traverse({:tag_as_content, []})
+      |> wrap(),
+      "}"
     )
-    |> post_traverse({:tag_as_content, []})
-    |> wrap()
-    |> ignore_whitespace()
-    |> ignore(string("}"))
 
   defparsec(:maybe_content, choice([content, empty()]))
 end
