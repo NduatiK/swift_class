@@ -117,21 +117,23 @@ defmodule SwiftClass.Modifiers do
   )
 
   content =
-    bracketed(
-      "{",
-      choice([
-        bracketed("[", comma_separated_list(choice(@bracket_child)), "]"),
-        #
-        newline_separated_list(choice(@bracket_child)),
-        #
-        ignore_whitespace()
-        |> choice(@bracket_child)
-        |> ignore_whitespace()
-      ])
-      |> post_traverse({:tag_as_content, []})
-      |> wrap(),
-      "}"
-    )
+    choice([
+      bracketed("[", comma_separated_list(choice(@bracket_child)), "]"),
+      #
+      newline_separated_list(choice(@bracket_child)),
+      #
+      ignore_whitespace()
+      |> choice(@bracket_child)
+      |> ignore_whitespace()
+    ])
+    |> post_traverse({:tag_as_content, []})
+    |> wrap()
 
-  defparsec(:maybe_content, choice([content, empty()]))
+  defparsec(
+    :maybe_content,
+    choice([
+      bracketed("{", content, "}"),
+      empty()
+    ])
+  )
 end
