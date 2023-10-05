@@ -100,7 +100,8 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :modifier,
-    word()
+    ignore_whitespace()
+    |> concat(word())
     |> parsec(:brackets)
     |> parsec(:maybe_content)
     |> post_traverse({:to_function_call_ast, []}),
@@ -109,10 +110,7 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :modifiers,
-    repeat(
-      ignore_whitespace()
-      |> parsec(:modifier)
-    ),
+    repeat(parsec(:modifier)),
     export_combinator: true
   )
 
@@ -122,9 +120,7 @@ defmodule SwiftClass.Modifiers do
       #
       newline_separated_list(choice(@bracket_child)),
       #
-      ignore_whitespace()
-      |> choice(@bracket_child)
-      |> ignore_whitespace()
+      choice(@bracket_child)
     ])
     |> post_traverse({:tag_as_content, []})
     |> wrap()
