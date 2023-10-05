@@ -139,7 +139,7 @@ defmodule SwiftClass.Tokens do
     |> reduce({Enum, :join, [""]})
   end
 
-  def bracketed(start \\ empty(), open, combinator, close) do
+  def enclosed(start \\ empty(), open, combinator, close) do
     start
     |> ignore_whitespace()
     |> ignore(string(open))

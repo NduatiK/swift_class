@@ -30,7 +30,7 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :key_value_list,
-    bracketed("[", parsec(:key_value_pairs), "]")
+    enclosed("[", parsec(:key_value_pairs), "]")
   )
 
   # .baz
@@ -77,7 +77,7 @@ defmodule SwiftClass.Modifiers do
       |> post_traverse({:to_attr_ast, []}),
       #
       helper_function()
-      |> bracketed("(", quoted_variable(), ")")
+      |> enclosed("(", quoted_variable(), ")")
       |> post_traverse({:to_function_call_ast, []})
       |> post_traverse({:tag_as_elixir_code, []}),
       #
@@ -97,7 +97,7 @@ defmodule SwiftClass.Modifiers do
 
   defparsec(
     :brackets,
-    bracketed("(", comma_separated_list(choice(@bracket_child)), ")")
+    enclosed("(", comma_separated_list(choice(@bracket_child)), ")")
   )
 
   defparsec(
@@ -118,7 +118,7 @@ defmodule SwiftClass.Modifiers do
 
   content =
     choice([
-      bracketed("[", comma_separated_list(choice(@bracket_child)), "]"),
+      enclosed("[", comma_separated_list(choice(@bracket_child)), "]"),
       #
       newline_separated_list(choice(@bracket_child)),
       #
@@ -130,7 +130,7 @@ defmodule SwiftClass.Modifiers do
   defparsec(
     :maybe_content,
     choice([
-      bracketed("{", content, "}"),
+      enclosed("{", content, "}"),
       empty()
     ])
   )
