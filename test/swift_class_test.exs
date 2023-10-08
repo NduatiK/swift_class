@@ -208,7 +208,7 @@ defmodule SwiftClassTest do
 
       output = [
         {
-          "red-header",
+          ["red-header", [target: :all]],
           [
             {:color, [], [{:., [], [nil, :red]}]},
             {:font, [], [{:., [], [nil, :largeTitle]}]}
@@ -229,7 +229,7 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, [target: :all]],
          [
            {:foo, [], [true]},
            {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
@@ -248,7 +248,7 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, [target: :all]],
          [
            {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
          ]}
@@ -271,14 +271,33 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, [target: :all]],
          [
            {:foo, [], [true]},
            {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
            {:bar, [], [false]}
          ]},
         {
-          "color-red",
+          ["color-red", [target: :all]],
+          [
+            {:color, [], [{:., [], [nil, :red]}]}
+          ]
+        }
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "can take optional target in definition" do
+      input = """
+        "color-red", target: :watchos do
+          color(.red)
+        end
+      """
+
+      output = [
+        {
+          ["color-red", [target: :watchos]],
           [
             {:color, [], [{:., [], [nil, :red]}]}
           ]
