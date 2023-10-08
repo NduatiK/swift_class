@@ -208,7 +208,7 @@ defmodule SwiftClassTest do
 
       output = [
         {
-          ["red-header", [target: :all]],
+          ["red-header", {:_target, [], Elixir}],
           [
             {:color, [], [{:., [], [nil, :red]}]},
             {:font, [], [{:., [], [nil, :largeTitle]}]}
@@ -229,7 +229,7 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, [target: :all]],
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
          [
            {:foo, [], [true]},
            {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
@@ -248,7 +248,7 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, [target: :all]],
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, {:_target, [], Elixir}],
          [
            {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
          ]}
@@ -271,14 +271,14 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, [target: :all]],
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
          [
            {:foo, [], [true]},
            {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
            {:bar, [], [false]}
          ]},
         {
-          ["color-red", [target: :all]],
+          ["color-red", {:_target, [], Elixir}],
           [
             {:color, [], [{:., [], [nil, :red]}]}
           ]
