@@ -16,14 +16,5 @@ defmodule SwiftClass do
     end
   end
 
-  classblocks =
-    repeat(
-      ignore_whitespace()
-      |> concat(block_open())
-      |> concat(block_contents())
-      |> concat(block_close())
-      |> post_traverse({:wrap_in_tuple, []})
-    )
-
-  defparsec(:parse_class_block, classblocks)
+  defparsec(:parse_class_block, repeat(parsec(:class_block)))
 end

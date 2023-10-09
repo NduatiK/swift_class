@@ -126,7 +126,6 @@ defmodule SwiftClass.Tokens do
   def variable() do
     # Variables cant start with numbers
     quoted_variable()
-    |> post_traverse({:tag_as_elixir_code, []})
   end
 
   def word() do
@@ -199,5 +198,22 @@ defmodule SwiftClass.Tokens do
         ignore(whitespace(min: 1))
       ])
     )
+  end
+
+  def key_value_pair() do
+    ignore_whitespace()
+    |> concat(word())
+    |> concat(ignore(string(":")))
+    |> ignore_whitespace()
+    |> concat(
+      choice([
+        literal(),
+        parsec(:ime),
+        parsec(:nested_attribute),
+        parsec(:key_value_list),
+        variable()
+      ])
+    )
+    |> post_traverse({:to_keyword_tuple_ast, []})
   end
 end
