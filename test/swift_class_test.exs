@@ -208,7 +208,7 @@ defmodule SwiftClassTest do
 
       output = [
         {
-          "red-header",
+          ["red-header", {:_target, [], Elixir}],
           [
             {:color, [], [{:., [], [nil, :red]}]},
             {:font, [], [{:., [], [nil, :largeTitle]}]}
@@ -229,12 +229,13 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
-         [
-           {:foo, [], [true]},
-           {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
-           {:bar, [], [false]}
-         ]}
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
+          [
+            {:foo, [], [true]},
+            {:color, [], [{:color_name, [], Elixir}]},
+            {:bar, [], [false]}
+          ]
+        }
       ]
 
       assert parse_class_block(input) == output
@@ -248,10 +249,9 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
-         [
-           {:color, [], [{Elixir, [], {:color, [], Elixir}}]}
-         ]}
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, {:_target, [], Elixir}],
+           [{:color, [], [{:color, [], Elixir}]}]
+         }
       ]
 
       assert parse_class_block(input) == output
@@ -271,17 +271,32 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]},
+        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
          [
            {:foo, [], [true]},
-           {:color, [], [{Elixir, [], {:color_name, [], Elixir}}]},
+           {:color, [], [{:color_name, [], Elixir}]},
            {:bar, [], [false]}
          ]},
         {
-          "color-red",
-          [
-            {:color, [], [{:., [], [nil, :red]}]}
-          ]
+          ["color-red", {:_target, [], Elixir}],
+          [{:color, [], [{:., [], [nil, :red]}]}]
+        }
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "can take optional target in definition" do
+      input = """
+        "color-red", target: :watchos do
+          color(.red)
+        end
+      """
+
+      output = [
+        {
+          ["color-red", [target: :watchos]],
+          [{:color, [], [{:., [], [nil, :red]}]}]
         }
       ]
 

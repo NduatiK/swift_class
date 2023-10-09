@@ -2,37 +2,52 @@ defmodule SwiftClass.Blocks do
   @moduledoc false
   import NimbleParsec
   import SwiftClass.Tokens
+  import SwiftClass.Modifiers
+  import SwiftClass.PostProcessors
 
-  def string_with_variable do
+  string_with_variable =
     string()
     |> ignore_whitespace()
     |> ignore(string("<>"))
     |> ignore_whitespace()
     |> concat(quoted_variable())
     |> post_traverse({:block_open_with_variable_to_ast, []})
-  end
 
-  def block_open do
+  block_open =
     choice([
-      string_with_variable(),
+      string_with_variable,
       string()
     ])
+    |> optional(
+      ignore_whitespace()
+      |> ignore(string(","))
+      |> ignore_whitespace()
+      |> parsec(:key_value_pairs)
+    )
     |> ignore_whitespace()
     |> ignore(string("do"))
-  end
+    |> post_traverse({:block_open_to_ast, []})
 
-  def block_contents do
+  block_close =
+    ignore_whitespace()
+    |> ignore(string("end"))
+
+  block_contents =
     repeat(
-      lookahead_not(block_close())
+      lookahead_not(block_close)
       |> ignore_whitespace()
       |> parsec(:modifier)
     )
     |> ignore_whitespace()
     |> wrap()
-  end
 
-  def block_close do
+  defparsec(
+    :class_block,
     ignore_whitespace()
-    |> ignore(string("end"))
-  end
+    |> concat(block_open)
+    |> concat(block_contents)
+    |> concat(block_close)
+    |> post_traverse({:wrap_in_tuple, []}),
+    export_combinator: true
+  )
 end

@@ -4,33 +4,19 @@ defmodule SwiftClass.Modifiers do
   import SwiftClass.HelperFunctions
   import NimbleParsec
 
-  key_value_pair =
-    ignore_whitespace()
-    |> concat(word())
-    |> concat(ignore(string(":")))
-    |> ignore_whitespace()
-    |> concat(
-      choice([
-        literal(),
-        parsec(:ime),
-        parsec(:nested_attribute),
-        parsec(:key_value_list),
-        variable()
-      ])
-    )
-    |> post_traverse({:to_keyword_tuple_ast, []})
-
   defparsec(
     :key_value_pairs,
     ignore_whitespace()
-    |> non_empty_comma_separated_list(key_value_pair)
+    |> non_empty_comma_separated_list(key_value_pair())
     |> ignore_whitespace()
-    |> wrap()
+    |> wrap(),
+    export_combinator: true
   )
 
   defparsec(
     :key_value_list,
-    enclosed("[", parsec(:key_value_pairs), "]")
+    enclosed("[", parsec(:key_value_pairs), "]"),
+    export_combinator: true
   )
 
   # .baz
@@ -100,22 +86,6 @@ defmodule SwiftClass.Modifiers do
     enclosed("(", comma_separated_list(choice(@bracket_child)), ")")
   )
 
-  defparsec(
-    :modifier,
-    ignore_whitespace()
-    |> concat(word())
-    |> parsec(:brackets)
-    |> parsec(:maybe_content)
-    |> post_traverse({:to_function_call_ast, []}),
-    export_combinator: true
-  )
-
-  defparsec(
-    :modifiers,
-    repeat(parsec(:modifier)),
-    export_combinator: true
-  )
-
   content =
     choice([
       enclosed("[", comma_separated_list(choice(@bracket_child)), "]"),
@@ -128,10 +98,18 @@ defmodule SwiftClass.Modifiers do
     |> wrap()
 
   defparsec(
-    :maybe_content,
-    choice([
-      enclosed("{", content, "}"),
-      empty()
-    ])
+    :modifier,
+    ignore_whitespace()
+    |> concat(word())
+    |> parsec(:brackets)
+    |> optional(enclosed("{", content, "}"))
+    |> post_traverse({:to_function_call_ast, []}),
+    export_combinator: true
+  )
+
+  defparsec(
+    :modifiers,
+    repeat(parsec(:modifier)),
+    export_combinator: true
   )
 end

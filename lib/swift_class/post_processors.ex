@@ -88,4 +88,12 @@ defmodule SwiftClass.PostProcessors do
   def tag_as_content(rest, content, context, _line, _offset) do
     {rest, [content: Enum.reverse(content)], context}
   end
+
+  def block_open_to_ast(rest, [class_name], context, _line, _offset) do
+    {rest, [[class_name, {:_target, [], Elixir}]], context}
+  end
+
+  def block_open_to_ast(rest, [key_value_pairs, class_name], context, _line, _offset) do
+    {rest, [[class_name, key_value_pairs]], context}
+  end
 end
