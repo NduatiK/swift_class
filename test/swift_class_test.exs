@@ -209,12 +209,10 @@ defmodule SwiftClassTest do
       output = [
         {
           ["red-header", {:_target, [], Elixir}],
-          {:__block__, [],
-            [
-              {:color, [], [{:., [], [nil, :red]}]},
-              {:font, [], [{:., [], [nil, :largeTitle]}]}
-            ]
-          }
+          [
+            {:color, [], [{:., [], [nil, :red]}]},
+            {:font, [], [{:., [], [nil, :largeTitle]}]}
+          ]
         }
       ]
 
@@ -232,13 +230,12 @@ defmodule SwiftClassTest do
 
       output = [
         {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
-         {:__block__, [],
           [
             {:foo, [], [true]},
             {:color, [], [{:color_name, [], Elixir}]},
             {:bar, [], [false]}
           ]
-        }}
+        }
       ]
 
       assert parse_class_block(input) == output
@@ -253,7 +250,7 @@ defmodule SwiftClassTest do
 
       output = [
         {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, {:_target, [], Elixir}],
-           {:color, [], [{:color, [], Elixir}]}
+           [{:color, [], [{:color, [], Elixir}]}]
          }
       ]
 
@@ -275,14 +272,14 @@ defmodule SwiftClassTest do
 
       output = [
         {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
-         {:__block__, [], [
+         [
            {:foo, [], [true]},
            {:color, [], [{:color_name, [], Elixir}]},
            {:bar, [], [false]}
-         ]}},
+         ]},
         {
           ["color-red", {:_target, [], Elixir}],
-          {:color, [], [{:., [], [nil, :red]}]}
+          [{:color, [], [{:., [], [nil, :red]}]}]
         }
       ]
 
@@ -299,7 +296,7 @@ defmodule SwiftClassTest do
       output = [
         {
           ["color-red", [target: :watchos]],
-          {:color, [], [{:., [], [nil, :red]}]}
+          [{:color, [], [{:., [], [nil, :red]}]}]
         }
       ]
 
