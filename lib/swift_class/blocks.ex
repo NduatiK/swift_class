@@ -10,7 +10,7 @@ defmodule SwiftClass.Blocks do
     |> ignore_whitespace()
     |> ignore(string("<>"))
     |> ignore_whitespace()
-    |> concat(quoted_variable())
+    |> concat(variable())
     |> post_traverse({:block_open_with_variable_to_ast, []})
 
   block_open =

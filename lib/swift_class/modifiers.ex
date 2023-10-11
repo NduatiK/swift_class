@@ -63,7 +63,7 @@ defmodule SwiftClass.Modifiers do
       |> post_traverse({:to_attr_ast, []}),
       #
       helper_function()
-      |> enclosed("(", quoted_variable(), ")")
+      |> enclosed("(", variable(), ")")
       |> post_traverse({:to_function_call_ast, []})
       |> post_traverse({:tag_as_elixir_code, []}),
       #

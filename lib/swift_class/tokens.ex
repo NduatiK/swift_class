@@ -107,25 +107,11 @@ defmodule SwiftClass.Tokens do
   # AST
   #
 
-  defp variable_word() do
+  def variable() do
     ascii_string([?a..?z, ?A..?Z, ?_], 1)
     |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
     |> reduce({Enum, :join, [""]})
-  end
-
-  # This is a variable that is found inside an Elixir
-  # context and is
-  def quoted_variable() do
-    # Variables cant start with numbers
-    variable_word()
     |> post_traverse({:to_elixir_variable_ast, []})
-  end
-
-  # This is a variable that is found inside the normal context
-  # and must therefore be marked as elixir code
-  def variable() do
-    # Variables cant start with numbers
-    quoted_variable()
   end
 
   def word() do
