@@ -49,7 +49,7 @@ defmodule SwiftClass.Tokens do
     |> map({String, :to_atom, []})
   end
 
-  def string() do
+  def double_quoted_string() do
     ignore(string(~s(")))
     |> repeat(
       lookahead_not(ascii_char([?"]))
@@ -66,7 +66,7 @@ defmodule SwiftClass.Tokens do
       boolean(),
       null(),
       atom(),
-      string()
+      double_quoted_string()
     ])
   end
 
@@ -151,12 +151,11 @@ defmodule SwiftClass.Tokens do
     #  1+ elems
     non_empty =
       elem_combinator
-      |> ignore_whitespace()
       |> repeat(
-        ignore(string(delimiter))
+        ignore_whitespace()
+        |> ignore(string(delimiter))
         |> ignore_whitespace()
         |> concat(elem_combinator)
-        |> ignore_whitespace()
       )
 
     empty_ = ignore_whitespace(empty())

@@ -14,6 +14,17 @@ defmodule SwiftClassTest do
     output
   end
 
+  describe "benchmark" do
+    test "parse long stylesheet" do
+      file = File.read!("test/helpers/classes.swiftui.exs")
+
+      for _ <- 1..1000 do
+        file
+        |> SwiftClass.parse_class_block()
+      end
+    end
+  end
+
   describe "parse/1" do
     test "parses modifier function definition" do
       input = "bold(true)"
@@ -229,13 +240,16 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
-          [
-            {:foo, [], [true]},
-            {:color, [], [{:color_name, [], Elixir}]},
-            {:bar, [], [false]}
-          ]
-        }
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]],
+            ["color-", {:color_name, [], Elixir}]},
+           {:_target, [], Elixir}
+         ],
+         [
+           {:foo, [], [true]},
+           {:color, [], [{:color_name, [], Elixir}]},
+           {:bar, [], [false]}
+         ]}
       ]
 
       assert parse_class_block(input) == output
@@ -249,9 +263,10 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]}, {:_target, [], Elixir}],
-           [{:color, [], [{:color, [], Elixir}]}]
-         }
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
+           {:_target, [], Elixir}
+         ], [{:color, [], [{:color, [], Elixir}]}]}
       ]
 
       assert parse_class_block(input) == output
@@ -271,7 +286,11 @@ defmodule SwiftClassTest do
       """
 
       output = [
-        {[{:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color_name, [], Elixir}]}, {:_target, [], Elixir}],
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]],
+            ["color-", {:color_name, [], Elixir}]},
+           {:_target, [], Elixir}
+         ],
          [
            {:foo, [], [true]},
            {:color, [], [{:color_name, [], Elixir}]},
@@ -346,10 +365,10 @@ defmodule SwiftClassTest do
       assert parse(input) == output
     end
 
-    test "snake_case" do
-      input = "font(family: snake_case(family))"
+    test "underscore" do
+      input = "font(family: underscore(family))"
 
-      output = {:font, [], [[family: {Elixir, [], {:snake_case, [], [{:family, [], Elixir}]}}]]}
+      output = {:font, [], [[family: {Elixir, [], {:underscore, [], [{:family, [], Elixir}]}}]]}
 
       assert parse(input) == output
     end

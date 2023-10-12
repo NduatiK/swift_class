@@ -6,7 +6,7 @@ defmodule SwiftClass.Blocks do
   import SwiftClass.PostProcessors
 
   string_with_variable =
-    string()
+    double_quoted_string()
     |> ignore_whitespace()
     |> ignore(string("<>"))
     |> ignore_whitespace()
@@ -16,7 +16,7 @@ defmodule SwiftClass.Blocks do
   block_open =
     choice([
       string_with_variable,
-      string()
+      double_quoted_string()
     ])
     |> optional(
       ignore_whitespace()
