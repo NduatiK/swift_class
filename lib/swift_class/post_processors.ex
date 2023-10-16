@@ -17,7 +17,7 @@ defmodule SwiftClass.PostProcessors do
 
   def throw_unexpected(
         rest,
-        [next_non_whitespace],
+        [selected],
         context,
         {line, _offset},
         byte_offset,
@@ -27,7 +27,7 @@ defmodule SwiftClass.PostProcessors do
     line_number = "#{line}"
     line_spacer = String.duplicate(" ", String.length(line_number))
 
-    error_text_length = String.length(next_non_whitespace)
+    error_text_length = String.length(selected)
 
     before = String.slice(context[:source], 0, max(0, byte_offset - error_text_length))
     middle = String.slice(context[:source], byte_offset - error_text_length, error_text_length)
@@ -51,7 +51,7 @@ defmodule SwiftClass.PostProcessors do
 
     maybe_but_got =
       if show_got? do
-        ", but got ‘#{next_non_whitespace}’"
+        ", but got ‘#{selected}’"
       else
         ""
       end
@@ -59,7 +59,7 @@ defmodule SwiftClass.PostProcessors do
     {:error,
      """
      #{context[:file] || "file.ex"}:#{line}: error:
-         Not valid: ‘#{next_non_whitespace}’
+         Not valid: ‘#{selected}’
          The parser does not support the following:
      #{line_spacer} |
      #{line_number} | #{elem(source_lines, line - 1)}

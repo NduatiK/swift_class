@@ -127,13 +127,13 @@ defmodule SwiftClass.Tokens do
   # end
 
   def word() do
-    choice([
+    # choice([
       ascii_string([?a..?z, ?A..?Z, ?_], 1)
       |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
-      |> reduce({Enum, :join, [""]}),
+      |> reduce({Enum, :join, [""]})
       # |> label("ASCII letter or underscore followed zero or more"),
-      error(expected: "a function or variable name")
-    ])
+    #   error(expected: "a function or variable name")
+    # ])
   end
 
   def modifier_name() do
@@ -197,15 +197,17 @@ defmodule SwiftClass.Tokens do
   # Collections
   #
 
-  def comma_separated_list(start \\ empty(), elem_combinator) do
-    delimiter_separated_list(start, elem_combinator, ",", true)
+  def comma_separated_list(start \\ empty(), elem_combinator, opts \\ []) do
+    delimiter_separated_list(start, elem_combinator, ",", true, opts)
   end
 
-  def non_empty_comma_separated_list(start, elem_combinator) do
-    delimiter_separated_list(start, elem_combinator, ",", false)
+  def non_empty_comma_separated_list(start, elem_combinator, opts \\ []) do
+    delimiter_separated_list(start, elem_combinator, ",", false, opts)
   end
 
-  defp delimiter_separated_list(start, elem_combinator, delimiter, allow_empty) do
+  defp delimiter_separated_list(start, elem_combinator, delimiter, allow_empty, opts) do
+    fail = Keyword.get(opts, :fail, true)
+
     maybe_errors =
       SwiftClass.Parser.get_one_of_errors(elem_combinator)
 
@@ -231,12 +233,22 @@ defmodule SwiftClass.Tokens do
         error(expected: "a \"#{delimiter}\" separated sequence")
       end
 
-    if allow_empty do
-      start
-      |> choice([non_empty, empty_, error])
+    if fail do
+      if allow_empty do
+        start
+        |> choice([non_empty, empty_, error])
+      else
+        start
+        |> concat(choice([non_empty, error]))
+      end
     else
-      start
-      |> concat(choice([non_empty, error]))
+      if allow_empty do
+        start
+        |> choice([non_empty, empty_])
+      else
+        start
+        |> concat(non_empty)
+      end
     end
   end
 
@@ -265,19 +277,25 @@ defmodule SwiftClass.Tokens do
       [
         {literal(), ~s'a number, string, nil, boolean or :atom'},
         {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
-        {parsec(:nested_attribute), ~s'another attribute eg ‘foo(bar())’'},
+        {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
         {parsec(:key_value_list),
          ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
         {variable(), ~s|a variable defined in the class header eg ‘color_name’|}
       ],
-      prefix: "the value in this keyword list to be "
+      prefix: "the value in this keyword list to be ",
+      error_range_parser:
+        choice([
+          string("["),
+          SwiftClass.Parser.non_whitespace()
+        ])
     )
     |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
   end
 
   def key_value_pairs() do
     ignore_whitespace()
-    |> non_empty_comma_separated_list(key_value_pair())
+    # -- TODO: Figure out how to drop errors
+    |> non_empty_comma_separated_list(key_value_pair(), fail: false)
     |> wrap()
   end
 

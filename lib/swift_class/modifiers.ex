@@ -75,7 +75,7 @@ defmodule SwiftClass.Modifiers do
     {literal(), ~s'a number, string, nil, boolean or :atom'},
     {key_value_pairs(),
      ~s'a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’'},
-    {parsec(:nested_attribute), ~s'another attribute eg ‘foo(bar())’'},
+    {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
     {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
     {variable(), ~s|a variable defined in the class header eg ‘color_name’|}
   ]

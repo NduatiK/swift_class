@@ -12,6 +12,7 @@ inspect = fn result ->
 end
 
 inspect.(SwiftClass.parse("font(Color.largeTitle.)"))
+inspect.(SwiftClass.parse("abc(def: 11, b: [lineWidth: 1lineWidth])"))
 
 
 # Haskell errors look like this:
