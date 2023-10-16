@@ -22,7 +22,7 @@ defmodule SwiftClass.Blocks do
       ignore_whitespace()
       |> ignore(string(","))
       |> ignore_whitespace()
-      |> parsec(:key_value_pairs)
+      |> concat(key_value_pairs())
     )
     |> ignore_whitespace()
     |> ignore(string("do"))

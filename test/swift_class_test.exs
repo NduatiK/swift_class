@@ -1,6 +1,7 @@
 defmodule SwiftClassTest do
   use ExUnit.Case
   doctest SwiftClass
+  alias SwiftClass.Helpers.HelperFunctionsTest
 
   def parse(input) do
     {:ok, output, _, _, _, _} = SwiftClass.parse(input)
@@ -16,7 +17,7 @@ defmodule SwiftClassTest do
 
   describe "benchmark" do
     test "parse long stylesheet" do
-      file = File.read!("test/helpers/classes.swiftui.exs")
+      file = File.read!("test/helpers/classes.swiftui.style")
 
       for _ <- 1..1000 do
         file
@@ -31,6 +32,13 @@ defmodule SwiftClassTest do
       output = {:bold, [], [true]}
 
       assert parse(input) == output
+    end
+
+    test "parses modifier function definition(2)" do
+      input = "1(true)"
+
+      assert {:error, "got \"1(true)\", but expected a function or variable name", _, _, _, _} =
+               SwiftClass.parse(input)
     end
 
     test "parses modifier function with content syntax" do
@@ -371,6 +379,22 @@ defmodule SwiftClassTest do
       output = {:font, [], [[family: {Elixir, [], {:underscore, [], [{:family, [], Elixir}]}}]]}
 
       assert parse(input) == output
+    end
+
+    test "additional helper function names can be provided" do
+      input = "to_ime(family)"
+
+      output = {Elixir, [], {:to_ime, [], [{:family, [], Elixir}]}}
+
+      assert {:ok, [result], _, _, _, _} = HelperFunctionsTest.helper_functions(input)
+      assert result == output
+    end
+
+    test "can't parse unknown helper functions" do
+      input = "to_unknown(family)"
+
+      assert {:error, "expected a 1-arity helper function (to_atom, " <> _, _, _, _, _} =
+               HelperFunctionsTest.helper_functions(input)
     end
   end
 end

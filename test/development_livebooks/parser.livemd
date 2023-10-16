@@ -1,0 +1,533 @@
+# Untitled notebook
+
+## Section
+
+```elixir
+defmodule SwiftClass.Parser do
+  def strip_one_of_error({combinator, label}) when is_list(combinator) and is_binary(label) do
+    {strip_one_of_error(combinator), label}
+  end
+
+  def strip_one_of_error(combinator) when is_list(combinator) do
+    Enum.map(combinator, fn part ->
+      case part do
+        {:choice, args, extra} ->
+          case Enum.reverse(args) do
+            [
+              [
+                {:traverse, _, :post,
+                 [
+                   {NimbleParsec, :__post_traverse__,
+                    [
+                      {SwiftClass.PostProcessors, :throw_unexpected, _}
+                    ]}
+                 ]}
+              ]
+              | other
+            ] ->
+              IO.inspect("match")
+              {:choice, Enum.reverse(other), extra}
+
+            _ ->
+              strip_one_of_error(part)
+          end
+
+        _ ->
+          strip_one_of_error(part)
+      end
+    end)
+  end
+
+  def strip_one_of_error(other), do: other
+end
+```
+
+```elixir
+a =
+  [
+    {[
+       {:choice,
+        [
+          [
+            {:traverse,
+             [
+               {:traverse,
+                [
+                  {:traverse,
+                   [
+                     {:traverse,
+                      [
+                        {:choice, [[string: "-"], []], nil},
+                        {:traverse,
+                         [
+                           {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                            [{NimbleParsec, :__compile_integer__, [1]}]},
+                           {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                            {NimbleParsec, :__cont_context__, []}, nil}
+                         ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
+                      ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+                   ], :post,
+                   [
+                     {NimbleParsec, :__map__,
+                      [
+                        {:var, [], NimbleParsec},
+                        {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
+                      ]}
+                   ]},
+                  {:string, "."},
+                  {:traverse,
+                   [
+                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                      [{NimbleParsec, :__compile_integer__, [1]}]},
+                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                      {NimbleParsec, :__cont_context__, []}, nil}
+                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
+                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_float]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse,
+                [
+                  {:choice, [[string: "-"], []], nil},
+                  {:traverse,
+                   [
+                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                      [{NimbleParsec, :__compile_integer__, [1]}]},
+                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                      {NimbleParsec, :__cont_context__, []}, nil}
+                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
+                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:choice,
+             [
+               [
+                 {:traverse, [string: "true"], :constant,
+                  [{NimbleParsec, :__constant__, [[true]]}]}
+               ],
+               [
+                 {:traverse, [string: "false"], :constant,
+                  [{NimbleParsec, :__constant__, [[false]]}]}
+               ]
+             ], nil}
+          ],
+          [
+            {:traverse, [string: "nil"], :constant, [{NimbleParsec, :__constant__, [[nil]]}]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+               {:choice,
+                [
+                  [
+                    {:label,
+                     [
+                       {:traverse,
+                        [
+                          {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}],
+                           :post,
+                           [
+                             {NimbleParsec, :__compile_string__,
+                              [1, {:integer, [], NimbleParsec}]}
+                           ]},
+                          {:traverse,
+                           [
+                             {:repeat,
+                              [
+                                {:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}
+                              ], {NimbleParsec, :__cont_context__, []}, nil}
+                           ], :post,
+                           [
+                             {NimbleParsec, :__runtime_string__,
+                              [0, nil, {:integer, [], NimbleParsec}]}
+                           ]}
+                        ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+                     ], "ASCII letter or underscore followed zero or more"}
+                  ],
+                  [
+                    {:traverse,
+                     [
+                       {:traverse,
+                        [
+                          {:repeat, [{:bin_segment, [], [], :utf8}],
+                           {NimbleParsec, :__repeat_while__,
+                            [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
+                        ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+                     ], :post,
+                     [
+                       {NimbleParsec, :__post_traverse__,
+                        [
+                          {SwiftClass.PostProcessors, :throw_unexpected,
+                           ["a function or variable name", false]}
+                        ]}
+                     ]}
+                  ]
+                ], nil}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_atom]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+               {:repeat,
+                [
+                  {:lookahead, [{:bin_segment, ~c"\"", [], :integer}], :negative},
+                  {:choice, [[string: "\""], [{:bin_segment, [], [], :utf8}]], nil}
+                ], {NimbleParsec, :__cont_context__, []}, nil},
+               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]}
+             ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse,
+                [
+                  {:repeat, [{:bin_segment, [], [], :utf8}],
+                   {NimbleParsec, :__repeat_while__,
+                    [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
+                ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+             ], :post,
+             [
+               {NimbleParsec, :__post_traverse__,
+                [
+                  {SwiftClass.PostProcessors, :throw_unexpected,
+                   [
+                     "one of the following:\n - float\n - int\n - boolean\n - nil\n - atom\n - string\n",
+                     false
+                   ]}
+                ]}
+             ]}
+          ]
+        ], nil}
+     ], "a number, string, nil, boolean or :atom"},
+    {[parsec: :key_value_pairs], "a list of key_value_pairs eg ‘style: [lineWidth: 1]’"},
+    {[parsec: :nested_attribute], "another attribute eg ‘foo(bar())’"},
+    {[parsec: :ime], "an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’"},
+    {[
+       {:traverse,
+        [
+          {:traverse,
+           [
+             {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
+              [
+                {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
+              ]},
+             {:traverse,
+              [
+                {:repeat, [{:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}],
+                 {NimbleParsec, :__cont_context__, []}, nil}
+              ], :post,
+              [
+                {NimbleParsec, :__runtime_string__, [0, nil, {:integer, [], NimbleParsec}]}
+              ]}
+           ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+        ], :post,
+        [
+          {NimbleParsec, :__post_traverse__,
+           [{SwiftClass.PostProcessors, :to_elixir_variable_ast, []}]}
+        ]}
+     ], "a variable defined in the class header eg ‘color_name’"}
+  ]
+
+:ok
+```
+
+```elixir
+SwiftClass.Parser.strip_one_of_error(a)
+
+:ok
+```
+
+```elixir
+hd(a)
+```
+
+```elixir
+IO.puts("""
+"file.ex:1: error:\n    Not valid: ‘(.foo.bar.baz(1,’\n    The parser does not support the following:\n  |\n1 | color\e[31m(.foo.bar.baz(1,\e[0m 2).qux)\n  |\n\nExpected \"(<CHILD>)\"\n\twhere <CHILD> is a \",\" separated sequence containing one of the following: \n\t\n\t - a number, string, nil, boolean or :atom\n\t - a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’\n\t - another attribute eg ‘foo(bar())’\n\t - an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’\n\t - a variable defined in the class header eg ‘color_name’\n\t\n", " 2).qux)", %{line: %{}, source: "color(.foo.bar.baz(1, 2).qux)"}
+""")
+```
+
+```elixir
+{[parsec: :key_value_pairs],
+ "a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’"}
+```
+
+```elixir
+[
+  {:choice,
+   [
+     [
+       {:choice,
+        [
+          [
+            {:traverse,
+             [
+               {:traverse,
+                [
+                  {:traverse,
+                   [
+                     {:traverse,
+                      [
+                        {:choice, [[string: "-"], []], nil},
+                        {:traverse,
+                         [
+                           {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                            [{NimbleParsec, :__compile_integer__, [1]}]},
+                           {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                            {NimbleParsec, :__cont_context__, []}, nil}
+                         ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
+                        {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}],
+                         :negative}
+                      ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+                   ], :post,
+                   [
+                     {NimbleParsec, :__map__,
+                      [
+                        {:var, [], NimbleParsec},
+                        {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
+                      ]}
+                   ]},
+                  {:string, "."},
+                  {:traverse,
+                   [
+                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                      [{NimbleParsec, :__compile_integer__, [1]}]},
+                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                      {NimbleParsec, :__cont_context__, []}, nil}
+                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
+                  {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :negative}
+                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_float]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse,
+                [
+                  {:choice, [[string: "-"], []], nil},
+                  {:traverse,
+                   [
+                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
+                      [{NimbleParsec, :__compile_integer__, [1]}]},
+                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
+                      {NimbleParsec, :__cont_context__, []}, nil}
+                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
+                  {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :negative}
+                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:choice,
+             [
+               [
+                 {:traverse, [string: "true"], :constant,
+                  [{NimbleParsec, :__constant__, [[true]]}]}
+               ],
+               [
+                 {:traverse, [string: "false"], :constant,
+                  [{NimbleParsec, :__constant__, [[false]]}]}
+               ]
+             ], nil}
+          ],
+          [
+            {:traverse, [string: "nil"], :constant, [{NimbleParsec, :__constant__, [[nil]]}]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+               {:choice,
+                [
+                  [
+                    {:traverse,
+                     [
+                       {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
+                        [
+                          {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
+                        ]},
+                       {:traverse,
+                        [
+                          {:repeat,
+                           [
+                             {:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}
+                           ], {NimbleParsec, :__cont_context__, []}, nil}
+                        ], :post,
+                        [
+                          {NimbleParsec, :__runtime_string__,
+                           [0, nil, {:integer, [], NimbleParsec}]}
+                        ]}
+                     ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+                  ],
+                  [
+                    {:traverse,
+                     [
+                       {:traverse,
+                        [
+                          {:repeat, [{:bin_segment, [], [], :utf8}],
+                           {NimbleParsec, :__repeat_while__,
+                            [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
+                        ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+                     ], :post,
+                     [
+                       {NimbleParsec, :__post_traverse__,
+                        [
+                          {SwiftClass.PostProcessors, :throw_unexpected,
+                           ["a function or variable name", false]}
+                        ]}
+                     ]}
+                  ]
+                ], nil}
+             ], :post,
+             [
+               {NimbleParsec, :__map__,
+                [
+                  {:var, [], NimbleParsec},
+                  {{:., [], [String, :to_atom]}, [], [{:var, [], NimbleParsec}]}
+                ]}
+             ]}
+          ],
+          [
+            {:traverse,
+             [
+               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+               {:repeat,
+                [
+                  {:lookahead, [{:bin_segment, ~c"\"", [], :integer}], :negative},
+                  {:choice, [[string: "\""], [{:bin_segment, [], [], :utf8}]], nil}
+                ], {NimbleParsec, :__cont_context__, []}, nil},
+               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]}
+             ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+          ]
+        ], nil}
+     ],
+     [
+       {:traverse,
+        [
+          {:traverse,
+           [
+             {:repeat, [{:bin_segment, [], [], :utf8}],
+              {NimbleParsec, :__repeat_while__, [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]},
+              nil}
+           ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+        ], :post,
+        [
+          {NimbleParsec, :__post_traverse__,
+           [
+             {SwiftClass.PostProcessors, :throw_unexpected,
+              ["one of the following:\n - a number, string, nil, boolean or :atom\n", false]}
+           ]}
+        ]}
+     ]
+   ], nil},
+  {:traverse,
+   [
+     {:traverse,
+      [
+        {:traverse, [{:bin_segment, ~c" \n\r\t", [], :utf8}], :post,
+         [{NimbleParsec, :__compile_string__, [1, {:utf8, [], NimbleParsec}]}]},
+        {:repeat, [{:bin_segment, ~c" \n\r\t", [], :utf8}], {NimbleParsec, :__cont_context__, []},
+         nil}
+      ], :post, [{NimbleParsec, :__runtime_string__, [1, nil, {:utf8, [], NimbleParsec}]}]}
+   ], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+  {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
+  {:choice,
+   [
+     [
+       {:traverse,
+        [
+          {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
+           [
+             {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
+           ]},
+          {:traverse,
+           [
+             {:repeat, [{:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}],
+              {NimbleParsec, :__cont_context__, []}, nil}
+           ], :post,
+           [
+             {NimbleParsec, :__runtime_string__, [0, nil, {:integer, [], NimbleParsec}]}
+           ]}
+        ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
+     ],
+     [
+       {:traverse,
+        [
+          {:traverse,
+           [
+             {:repeat, [{:bin_segment, [], [], :utf8}],
+              {NimbleParsec, :__repeat_while__, [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]},
+              nil}
+           ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
+        ], :post,
+        [
+          {NimbleParsec, :__post_traverse__,
+           [
+             {SwiftClass.PostProcessors, :throw_unexpected,
+              ["a function or variable name", false]}
+           ]}
+        ]}
+     ]
+   ], nil},
+  {:traverse,
+   [
+     {:choice,
+      [
+        [
+          {:traverse,
+           [
+             {:traverse, [{:bin_segment, ~c" \n\r\t", [], :utf8}], :post,
+              [
+                {NimbleParsec, :__compile_string__, [1, {:utf8, [], NimbleParsec}]}
+              ]},
+             {:repeat, [{:bin_segment, ~c" \n\r\t", [], :utf8}],
+              {NimbleParsec, :__cont_context__, []}, nil}
+           ], :post,
+           [
+             {NimbleParsec, :__runtime_string__, [1, nil, {:utf8, [], NimbleParsec}]}
+           ]}
+        ],
+        []
+      ], nil}
+   ], :constant, [{NimbleParsec, :__constant__, [[]]}]}
+]
+```

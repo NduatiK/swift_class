@@ -1,5 +1,11 @@
 defmodule SwiftClass.Tokens do
   import NimbleParsec
+  alias SwiftClass.PostProcessors
+  import SwiftClass.Parser
+
+  def start() do
+    pre_traverse(empty(), {PostProcessors, :prepare_context, []})
+  end
 
   #
   # Literals
@@ -28,6 +34,7 @@ defmodule SwiftClass.Tokens do
   def int() do
     optional(minus())
     |> concat(integer(min: 1))
+    |> lookahead_not(ascii_char([?a..?z, ?A..?Z, ?_]))
     |> reduce({Enum, :join, [""]})
     |> map({String, :to_integer, []})
   end
@@ -39,6 +46,7 @@ defmodule SwiftClass.Tokens do
   def float() do
     int()
     |> concat(frac())
+    |> lookahead_not(ascii_char([?a..?z, ?A..?Z, ?_]))
     |> reduce({Enum, :join, [""]})
     |> map({String, :to_float, []})
   end
@@ -60,26 +68,26 @@ defmodule SwiftClass.Tokens do
   end
 
   def literal() do
-    choice([
-      float(),
-      int(),
-      boolean(),
-      null(),
-      atom(),
-      double_quoted_string()
+    one_of([
+      {float(), "float"},
+      {int(), "int"},
+      {boolean(), "boolean"},
+      {null(), "nil"},
+      {atom(), "atom"},
+      {double_quoted_string(), "string"}
     ])
   end
 
   #
   # Whitespace
   #
-
+  @whitespace_chars [?\s, ?\n, ?\r, ?\t]
   def whitespace(opts) do
-    utf8_string([?\s, ?\n, ?\r, ?\t], opts)
+    utf8_string(@whitespace_chars, opts)
   end
 
   def whitespace_except(exception, opts) do
-    utf8_string(Enum.reject([?\s, ?\n, ?\r, ?\t], &(<<&1>> == exception)), opts)
+    utf8_string(Enum.reject(@whitespace_chars, &(<<&1>> == exception)), opts)
   end
 
   def ignore_whitespace(combinator \\ empty()) do
@@ -109,13 +117,33 @@ defmodule SwiftClass.Tokens do
 
   def variable() do
     ascii_string([?a..?z, ?A..?Z, ?_], 1)
-    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
     |> reduce({Enum, :join, [""]})
-    |> post_traverse({:to_elixir_variable_ast, []})
+    |> post_traverse({PostProcessors, :to_elixir_variable_ast, []})
   end
 
+  # def ascii_chars() do
+  #   ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
+  # end
+
   def word() do
-    ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 1)
+    choice([
+      ascii_string([?a..?z, ?A..?Z, ?_], 1)
+      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+      |> reduce({Enum, :join, [""]}),
+      # |> label("ASCII letter or underscore followed zero or more"),
+      error(expected: "a function or variable name")
+    ])
+  end
+
+  def modifier_name() do
+    choice([
+      ascii_string([?a..?z, ?A..?Z, ?_], 1)
+      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+      |> reduce({Enum, :join, [""]})
+      |> label("ASCII letter or underscore followed zero or more"),
+      error(expected: "a modifier name", show_got?: true)
+    ])
   end
 
   def module_name() do
@@ -124,30 +152,63 @@ defmodule SwiftClass.Tokens do
     |> reduce({Enum, :join, [""]})
   end
 
-  def enclosed(start \\ empty(), open, combinator, close) do
+  def enclosed(start \\ empty(), open, combinator, close, opts \\ []) do
+    allow_empty = Keyword.get(opts, :allow_empty, true)
+    optional = Keyword.get(opts, :optional, false)
+
+    maybe_errors =
+      SwiftClass.Parser.get_one_of_errors(combinator)
+
+    enclosed_without_elems =
+      ignore(string(open))
+      |> ignore_whitespace()
+      |> ignore(string(close))
+
+    enclosed_with_elems =
+      ignore(string(open))
+      |> ignore_whitespace()
+      |> concat(combinator)
+      |> ignore_whitespace()
+      |> ignore(string(close))
+      |> ignore_whitespace()
+
+    error =
+      if maybe_errors do
+        error(expected: "\"#{open}<CHILD>#{close}\"\n\twhere <CHILD> is #{maybe_errors}")
+      else
+        error(expected: "to match #{open}#{close} or #{open} elements #{close}")
+      end
+
     start
     |> ignore_whitespace()
-    |> ignore(string(open))
-    |> ignore_whitespace()
-    |> concat(combinator)
-    |> ignore_whitespace()
-    |> ignore(string(close))
-    |> ignore_whitespace()
+    |> choice(
+      if allow_empty do
+        [
+          enclosed_without_elems,
+          enclosed_with_elems
+        ] ++ if(not optional, do: [error], else: [empty()])
+      else
+        [enclosed_with_elems] ++ if(not optional, do: [error], else: [empty()])
+      end
+    )
   end
 
   #
   # Collections
   #
 
-  def comma_separated_list(combinator \\ empty(), elem_combinator) do
-    delimiter_separated_list(combinator, elem_combinator, ",", true)
+  def comma_separated_list(start \\ empty(), elem_combinator) do
+    delimiter_separated_list(start, elem_combinator, ",", true)
   end
 
-  def non_empty_comma_separated_list(combinator, elem_combinator) do
-    delimiter_separated_list(combinator, elem_combinator, ",", false)
+  def non_empty_comma_separated_list(start, elem_combinator) do
+    delimiter_separated_list(start, elem_combinator, ",", false)
   end
 
-  def delimiter_separated_list(combinator, elem_combinator, delimiter, allow_empty \\ true) do
+  defp delimiter_separated_list(start, elem_combinator, delimiter, allow_empty) do
+    maybe_errors =
+      SwiftClass.Parser.get_one_of_errors(elem_combinator)
+
     #  1+ elems
     non_empty =
       elem_combinator
@@ -160,12 +221,22 @@ defmodule SwiftClass.Tokens do
 
     empty_ = ignore_whitespace(empty())
 
+    error =
+      if maybe_errors do
+        error(
+          expected:
+            "a \"#{delimiter}\" separated sequence containing one of the following: \n#{indent(maybe_errors)}"
+        )
+      else
+        error(expected: "a \"#{delimiter}\" separated sequence")
+      end
+
     if allow_empty do
-      combinator
-      |> choice([non_empty, empty_])
+      start
+      |> choice([non_empty, empty_, error])
     else
-      combinator
-      |> concat(non_empty)
+      start
+      |> concat(choice([non_empty, error]))
     end
   end
 
@@ -189,16 +260,35 @@ defmodule SwiftClass.Tokens do
     ignore_whitespace()
     |> concat(word())
     |> concat(ignore(string(":")))
-    |> ignore_whitespace()
-    |> concat(
-      choice([
-        literal(),
-        parsec(:ime),
-        parsec(:nested_attribute),
-        parsec(:key_value_list),
-        variable()
-      ])
+    |> ignore(whitespace(min: 1))
+    |> one_of(
+      [
+        {literal(), ~s'a number, string, nil, boolean or :atom'},
+        {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+        {parsec(:nested_attribute), ~s'another attribute eg ‘foo(bar())’'},
+        {parsec(:key_value_list),
+         ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
+        {variable(), ~s|a variable defined in the class header eg ‘color_name’|}
+      ],
+      prefix: "the value in this keyword list to be "
     )
-    |> post_traverse({:to_keyword_tuple_ast, []})
+    |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
+  end
+
+  def key_value_pairs() do
+    ignore_whitespace()
+    |> non_empty_comma_separated_list(key_value_pair())
+    |> wrap()
+  end
+
+  #
+  # Error
+  #
+
+  def mark_line(start \\ empty(), name, gen_combinator) do
+    start
+    |> concat(gen_combinator.())
+    |> pre_traverse({PostProcessors, :mark_line, [name]})
+    |> post_traverse({PostProcessors, :unmark_line, [name]})
   end
 end

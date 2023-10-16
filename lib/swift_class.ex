@@ -2,6 +2,7 @@ defmodule SwiftClass do
   @moduledoc false
   import NimbleParsec
   alias SwiftClass.Modifiers
+  alias SwiftClass.Tokens
   import SwiftClass.Blocks
 
   def parse(input) do
@@ -14,5 +15,9 @@ defmodule SwiftClass do
     end
   end
 
-  defparsec(:parse_class_block, repeat(parsec(:class_block)))
+  defparsec(
+    :parse_class_block,
+    Tokens.start()
+    |> repeat(parsec(:class_block))
+  )
 end
