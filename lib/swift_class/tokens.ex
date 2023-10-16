@@ -127,13 +127,9 @@ defmodule SwiftClass.Tokens do
   # end
 
   def word() do
-    # choice([
-      ascii_string([?a..?z, ?A..?Z, ?_], 1)
-      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
-      |> reduce({Enum, :join, [""]})
-      # |> label("ASCII letter or underscore followed zero or more"),
-    #   error(expected: "a function or variable name")
-    # ])
+    ascii_string([?a..?z, ?A..?Z, ?_], 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+    |> reduce({Enum, :join, [""]})
   end
 
   def modifier_name() do
