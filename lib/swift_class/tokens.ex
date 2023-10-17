@@ -138,7 +138,7 @@ defmodule SwiftClass.Tokens do
       |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
       |> reduce({Enum, :join, [""]})
       |> label("ASCII letter or underscore followed zero or more"),
-      error(expected: "a modifier name", show_got?: true)
+      error(expected: "a modifier name", show_got?: true, error_range_parser: SwiftClass.Parser.unless_matches([?(]))
     ])
   end
 
@@ -168,9 +168,26 @@ defmodule SwiftClass.Tokens do
       |> ignore(string(close))
       |> ignore_whitespace()
 
+
+      inner =
+        if maybe_errors do
+          "<CHILD>"
+        else
+          " elements "
+        end
+  
+
+      expectation = 
+        if allow_empty do
+          "‘#{open}#{close}’ or ‘#{open}#{inner}#{close}’"
+        else
+          
+          "‘#{open}#{inner}#{close}’"
+        end
+
     error =
       if maybe_errors do
-        error(expected: "\"#{open}<CHILD>#{close}\"\n\twhere <CHILD> is #{maybe_errors}")
+        error(expected: "#{expectation}\n\twhere <CHILD> is #{maybe_errors}")
       else
         error(expected: "to match #{open}#{close} or #{open} elements #{close}")
       end

@@ -58,7 +58,7 @@ defmodule SwiftClass.PostProcessors do
 
     {:error,
      """
-     #{context[:file] || "file.ex"}:#{line}: error:
+     #{context[:file] || ""}:#{line}: error:
          Not valid: ‘#{selected}’
          The parser does not support the following:
      #{line_spacer} |

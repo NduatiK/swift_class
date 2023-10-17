@@ -96,7 +96,7 @@ defmodule SwiftClass.Modifiers do
         #
         {one_of(@bracket_child), "a single modifier"}
       ],
-      prefix: "content in the form ‘modifier { <CHILD> }’ where <CHILD> is "
+      prefix: "content in the form ‘<modifier> { <content> }’ where <content> is "
     )
     |> post_traverse({PostProcessors, :tag_as_content, []})
     |> wrap()

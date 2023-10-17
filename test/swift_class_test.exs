@@ -37,7 +37,7 @@ defmodule SwiftClassTest do
     test "parses modifier function definition(2)" do
       input = "1(true)"
 
-      assert {:error, "got \"1(true)\", but expected a function or variable name", _, _, _, _} =
+      assert {:error, ":1: error:" <> _, _, _, _, _} =
                SwiftClass.parse(input)
     end
 

@@ -5,6 +5,11 @@ defmodule SwiftClass.Parser do
   alias __MODULE__
   @whitespace_chars [?\s, ?\n, ?\r, ?\t]
 
+  def unless_matches(list) do
+    repeat_until(utf8_char([]), list)
+    |> reduce({List, :to_string, []})
+  end
+
   def non_whitespace() do
     repeat_until(utf8_char([]), @whitespace_chars)
     |> reduce({List, :to_string, []})
