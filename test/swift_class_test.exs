@@ -4,7 +4,7 @@ defmodule SwiftClassTest do
   alias SwiftClass.Helpers.HelperFunctionsTest
 
   def parse(input) do
-    {:ok, output, _, _, _, _} = SwiftClass.parse(input)
+    {:ok, output, _, _, _, _} = SwiftClass.parse(input,content: [file: __ENV__.file])
 
     output
   end

@@ -7,7 +7,7 @@ defmodule SwiftClass.PostProcessors do
      |> Map.put_new(:source, rest)}
   end
 
-  def set_context(rest, args, context, {line, _offset}, _byte_offset, {k,v}) do
+  def set_context(rest, args, context, {line, _offset}, _byte_offset, {k, v}) do
     {rest, args, put_in(context, [k], v)}
   end
 
@@ -28,7 +28,8 @@ defmodule SwiftClass.PostProcessors do
         expectation,
         show_got?
       ) do
-    line_number = "#{line}"
+    source_line = (context[:source_line] || 1) + line - 1
+    line_number = "#{source_line}"
     line_spacer = String.duplicate(" ", String.length(line_number))
 
     error_text_length = String.length(selected)
@@ -62,7 +63,7 @@ defmodule SwiftClass.PostProcessors do
 
     {:error,
      """
-     #{context[:file] || ""}:#{line}: error:
+     #{context[:file] || ""}:#{source_line}: error:
          Not valid: ‘#{selected}’
          The parser does not support the following:
      #{line_spacer} |

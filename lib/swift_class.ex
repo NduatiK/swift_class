@@ -5,8 +5,8 @@ defmodule SwiftClass do
   alias SwiftClass.Tokens
   import SwiftClass.Blocks
 
-  def parse(input) do
-    case Modifiers.modifiers(input) do
+  def parse(input, opts \\ []) do
+    case Modifiers.modifiers(input, opts) do
       {:ok, [output], a, b, c, d} ->
         {:ok, output, a, b, c, d}
 
