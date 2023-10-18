@@ -308,28 +308,6 @@ defmodule SwiftClass.Tokens do
     |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
   end
 
-  # def key_value_list_error() do
-  #   pair =
-  #     ignore(word())
-  #     |> concat(ignore(string(":")))
-  #     |> ignore(whitespace(min: 1))
-  #     |> choice(Enum.map(key_value_children(), &ignore(strip_one_of_error(elem(&1, 0)))) ++ [
-  #       non_whitespace(at: "error", also_ignore: [?], ?,])
-  #     ])
-
-  #   ignore(string("["))
-  #   |> concat(pair)
-  #   |> repeat(
-  #     ignore_whitespace()
-  #     |> ignore(string(","))
-  #     |> ignore_whitespace()
-  #     |> concat(pair)
-  #   )
-  #   |> map({List, :wrap, []})
-  #   |> map({List, :flatten, []})
-  #   |> map({Kernel, :hd, []})
-  # end
-
   def key_value_pairs() do
     ignore_whitespace()
     |> non_empty_comma_separated_list(key_value_pair(), fail: false)

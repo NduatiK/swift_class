@@ -28,11 +28,6 @@ defmodule SwiftClass.PostProcessors do
         expectation,
         show_got?
       ) do
-      IO.inspect({rest,
-      [selected]}
-      )
-      IO.inspect({line, _offset,byte_offset}
-      )
     line_number = "#{line}"
     line_spacer = String.duplicate(" ", String.length(line_number))
 
@@ -54,7 +49,6 @@ defmodule SwiftClass.PostProcessors do
             after_
         end
       ]
-      |> IO.inspect()
       |> IO.iodata_to_binary()
       |> String.split("\n")
       |> List.to_tuple()
