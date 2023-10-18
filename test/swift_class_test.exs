@@ -41,35 +41,6 @@ defmodule SwiftClassTest do
                SwiftClass.parse(input)
     end
 
-    test "parses modifier function with content syntax" do
-      input = "background(){:content}"
-      output = {:background, [], [[content: :content]]}
-
-      assert parse(input) == output
-
-      # permits whitespace surrounds
-      input = "background() { :content }"
-
-      assert parse(input) == output
-
-      # permits array of content references
-
-      input = "background() { [:content1, :content2] }"
-
-      output = {:background, [], [[content: [:content1, :content2]]]}
-
-      assert parse(input) == output
-
-      # permits multiline
-      input = """
-      background() {
-        :content1
-        :content2
-      }
-      """
-
-      assert parse(input) == output
-    end
 
     test "parses modifier with multiple arguments" do
       input = "background(\"foo\", \"bar\")"
@@ -110,14 +81,6 @@ defmodule SwiftClassTest do
       output =
         {:font, [],
          [[color: {:., [], [:Color, {:., [], [:red, {:shadow, [], [{:., [], [nil, :thick]}]}]}]}]]}
-
-      assert parse(input) == output
-    end
-
-    test "parses chained IMEs within the content block" do
-      input = "background() { Color.red }"
-
-      output = {:background, [], [[content: {:., [], [:Color, :red]}]]}
 
       assert parse(input) == output
     end

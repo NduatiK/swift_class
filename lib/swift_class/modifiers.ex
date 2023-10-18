@@ -85,28 +85,11 @@ defmodule SwiftClass.Modifiers do
     enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
   )
 
-  content =
-    one_of(
-      empty(),
-      [
-        {enclosed("[", comma_separated_list(one_of(@bracket_child)), "]"),
-         "a comma separated list of modifiers"},
-        #
-        {newline_separated_list(one_of(@bracket_child)), "a newline-separated list of modifiers"},
-        #
-        {one_of(@bracket_child), "a single modifier"}
-      ],
-      prefix: "content in the form ‘<modifier> { <content> }’ where <content> is "
-    )
-    |> post_traverse({PostProcessors, :tag_as_content, []})
-    |> wrap()
-
   defparsec(
     :modifier,
     ignore_whitespace()
     |> concat(modifier_name())
     |> parsec(:brackets)
-    |> enclosed("{", content, "}", optional: true)
     |> post_traverse({PostProcessors, :to_function_call_ast, []}),
     export_combinator: true
   )
@@ -115,7 +98,7 @@ defmodule SwiftClass.Modifiers do
     :modifiers,
     start()
     |> times(parsec(:modifier), min: 1)
-    |> eos(),
+    |> one_of([{eos(), "nothing after the modifier"}]),
     export_combinator: true
   )
 
