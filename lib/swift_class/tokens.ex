@@ -138,7 +138,11 @@ defmodule SwiftClass.Tokens do
       |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
       |> reduce({Enum, :join, [""]})
       |> label("ASCII letter or underscore followed zero or more"),
-      error(expected: "a modifier name", show_got?: true, error_range_parser: SwiftClass.Parser.unless_matches([?(]))
+      error(
+        expected: "a modifier name",
+        show_got?: true,
+        error_range_parser: SwiftClass.Parser.unless_matches([?(])
+      )
     ])
   end
 
@@ -168,22 +172,19 @@ defmodule SwiftClass.Tokens do
       |> ignore(string(close))
       |> ignore_whitespace()
 
+    inner =
+      if maybe_errors do
+        "<CHILD>"
+      else
+        " elements "
+      end
 
-      inner =
-        if maybe_errors do
-          "<CHILD>"
-        else
-          " elements "
-        end
-  
-
-      expectation = 
-        if allow_empty do
-          "‘#{open}#{close}’ or ‘#{open}#{inner}#{close}’"
-        else
-          
-          "‘#{open}#{inner}#{close}’"
-        end
+    expectation =
+      if allow_empty do
+        "‘#{open}#{close}’ or ‘#{open}#{inner}#{close}’"
+      else
+        "‘#{open}#{inner}#{close}’"
+      end
 
     error =
       if maybe_errors do
@@ -281,33 +282,56 @@ defmodule SwiftClass.Tokens do
     )
   end
 
+  def key_value_children,
+    do: [
+      {literal(), ~s'a number, string, nil, boolean or :atom'},
+      {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+      {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
+      {parsec(:key_value_list),
+       ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
+      {variable(), ~s|a variable defined in the class header eg ‘color_name’|}
+    ]
+
   def key_value_pair() do
     ignore_whitespace()
     |> concat(word())
     |> concat(ignore(string(":")))
     |> ignore(whitespace(min: 1))
-    |> one_of(
-      [
-        {literal(), ~s'a number, string, nil, boolean or :atom'},
-        {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
-        {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
-        {parsec(:key_value_list),
-         ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
-        {variable(), ~s|a variable defined in the class header eg ‘color_name’|}
-      ],
+    |> one_of(key_value_children(),
       prefix: "the value in this keyword list to be ",
       error_range_parser:
         choice([
-          string("["),
-          SwiftClass.Parser.non_whitespace()
+          parsec(:key_value_list_error),
+          non_whitespace(also_ignore: [?@])
         ])
     )
     |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
   end
 
+  # def key_value_list_error() do
+  #   pair =
+  #     ignore(word())
+  #     |> concat(ignore(string(":")))
+  #     |> ignore(whitespace(min: 1))
+  #     |> choice(Enum.map(key_value_children(), &ignore(strip_one_of_error(elem(&1, 0)))) ++ [
+  #       non_whitespace(at: "error", also_ignore: [?], ?,])
+  #     ])
+
+  #   ignore(string("["))
+  #   |> concat(pair)
+  #   |> repeat(
+  #     ignore_whitespace()
+  #     |> ignore(string(","))
+  #     |> ignore_whitespace()
+  #     |> concat(pair)
+  #   )
+  #   |> map({List, :wrap, []})
+  #   |> map({List, :flatten, []})
+  #   |> map({Kernel, :hd, []})
+  # end
+
   def key_value_pairs() do
     ignore_whitespace()
-    # -- TODO: Figure out how to drop errors
     |> non_empty_comma_separated_list(key_value_pair(), fail: false)
     |> wrap()
   end

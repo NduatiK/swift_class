@@ -7,6 +7,10 @@ defmodule SwiftClass.PostProcessors do
      |> Map.put_new(:source, rest)}
   end
 
+  def set_context(rest, args, context, {line, _offset}, _byte_offset, {k,v}) do
+    {rest, args, put_in(context, [k], v)}
+  end
+
   def mark_line(rest, args, context, {line, _offset}, _byte_offset, name) do
     {rest, args, put_in(context, [:line, name], line)}
   end
@@ -24,6 +28,11 @@ defmodule SwiftClass.PostProcessors do
         expectation,
         show_got?
       ) do
+      IO.inspect({rest,
+      [selected]}
+      )
+      IO.inspect({line, _offset,byte_offset}
+      )
     line_number = "#{line}"
     line_spacer = String.duplicate(" ", String.length(line_number))
 
@@ -45,6 +54,7 @@ defmodule SwiftClass.PostProcessors do
             after_
         end
       ]
+      |> IO.inspect()
       |> IO.iodata_to_binary()
       |> String.split("\n")
       |> List.to_tuple()
@@ -66,7 +76,8 @@ defmodule SwiftClass.PostProcessors do
      #{line_spacer} |
 
      Expected #{expectation}#{maybe_but_got}
-     """}
+     """
+     |> String.trim()}
   end
 
   # PostProcessors

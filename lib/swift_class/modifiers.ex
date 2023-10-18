@@ -118,4 +118,42 @@ defmodule SwiftClass.Modifiers do
     |> eos(),
     export_combinator: true
   )
+
+  pair =
+    ignore(word())
+    |> concat(ignore(string(":")))
+    |> ignore(whitespace(min: 1))
+    |> choice(
+      Enum.map(key_value_children(), &ignore(strip_one_of_error(elem(&1, 0)))) ++
+        [
+          non_whitespace(at: "error", also_ignore: [?], ?,])
+          |> post_traverse({PostProcessors, :set_context, [{:found_error?, true}]})
+        ]
+    )
+
+  defparsec(
+    :key_value_list_error,
+    ignore(string("["))
+    |> concat(pair)
+    |> repeat_while(
+      ignore_whitespace()
+      |> ignore(string(","))
+      |> ignore_whitespace()
+      |> concat(pair),
+      {:not_found_error, []}
+    )
+    |> map({List, :wrap, []})
+    |> map({List, :flatten, []})
+    |> map({Kernel, :hd, []})
+    |> post_traverse({PostProcessors, :set_context, [{:found_error?, false}]}),
+    export_combinator: true
+  )
+
+  def not_found_error(_, %{found_error?: true} = context, _, _) do
+    {:halt, context}
+  end
+
+  def not_found_error(_, context, _, _) do
+    {:cont, context}
+  end
 end
