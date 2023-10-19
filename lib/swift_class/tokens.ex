@@ -302,7 +302,7 @@ defmodule SwiftClass.Tokens do
       error_range_parser:
         choice([
           parsec(:key_value_list_error),
-          non_whitespace(also_ignore: [?@])
+          non_whitespace(also_ignore: [?,])
         ])
     )
     |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})

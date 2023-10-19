@@ -29,13 +29,12 @@ defmodule SwiftClass.PostProcessors do
         show_got?
       ) do
     source_line = (context[:source_line] || 1) + line - 1
-    line_number = "#{source_line}"
-    line_spacer = String.duplicate(" ", String.length(line_number))
 
     error_text_length = String.length(selected)
 
     before = String.slice(context[:source], 0, max(0, byte_offset - error_text_length))
     middle = String.slice(context[:source], byte_offset - error_text_length, error_text_length)
+    middle = if(middle == " ", do: "_", else: middle)
     after_ = String.slice(context[:source], byte_offset..-1//1)
 
     source_lines =
@@ -52,7 +51,29 @@ defmodule SwiftClass.PostProcessors do
       ]
       |> IO.iodata_to_binary()
       |> String.split("\n")
-      |> List.to_tuple()
+
+    error_lines =
+      [
+        String.replace(before, ~r/([^\n])/, " "),
+        IO.ANSI.format([:red, String.replace(middle, ~r/[^\n]/, "^")]),
+        String.replace(after_, ~r/([^\n])/, " ")
+      ]
+      |> IO.iodata_to_binary()
+      |> String.split("\n")
+
+    max_line_number = "#{source_line + Enum.count(error_lines) - 1}"
+    line_spacer = String.duplicate(" ", String.length(max_line_number))
+
+    lines =
+      Enum.zip(source_lines, error_lines)
+      |> Enum.with_index(source_line)
+      |> Enum.map(fn {{s_l, e_l}, line_num} ->
+        """
+        #{line_num} | #{s_l}
+        #{line_spacer} | #{e_l}
+        """
+        |> String.trim()
+      end)
 
     maybe_but_got =
       if show_got? do
@@ -64,10 +85,10 @@ defmodule SwiftClass.PostProcessors do
     {:error,
      """
      #{context[:file] || ""}:#{source_line}: error:
-         Not valid: ‘#{selected}’
-         The parser does not support the following:
+     Not valid: ‘#{selected}’
+     The parser does not support the following:
      #{line_spacer} |
-     #{line_number} | #{elem(source_lines, line - 1)}
+     #{lines}
      #{line_spacer} |
 
      Expected #{expectation}#{maybe_but_got}

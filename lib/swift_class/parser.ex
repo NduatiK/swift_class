@@ -10,8 +10,8 @@ defmodule SwiftClass.Parser do
     |> reduce({List, :to_string, []})
   end
 
-  def  non_whitespace(opts \\ []) do
-    also_ignore = Keyword.get(opts,:also_ignore, [])
+  def non_whitespace(opts \\ []) do
+    also_ignore = Keyword.get(opts, :also_ignore, [])
 
     repeat_until(utf8_char([]), @whitespace_chars ++ also_ignore)
     |> reduce({List, :to_string, []})
@@ -22,7 +22,7 @@ defmodule SwiftClass.Parser do
   end
 
   def not_match(<<char::utf8, _::binary>>, context, _, _, matches) do
-  if char in matches do
+    if char in matches do
       {:halt, context}
     else
       {:cont, context}

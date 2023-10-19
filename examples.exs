@@ -5,6 +5,7 @@ inspect = fn input, line ->
   result = elem(SwiftClass.parse(input, [context: [file: __ENV__.file, source_line: line]]), 1)
   IO.puts(if(is_binary(result), do: result, else: inspect(result)))
 end
+inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
 
 inspect.("blue", __ENV__.line)
 inspect.("1(.red)", __ENV__.line)

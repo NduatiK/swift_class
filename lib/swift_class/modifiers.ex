@@ -104,14 +104,21 @@ defmodule SwiftClass.Modifiers do
 
   pair =
     ignore(word())
-    |> concat(ignore(string(":")))
-    |> ignore(whitespace(min: 1))
-    |> choice(
-      Enum.map(key_value_children(), &ignore(strip_one_of_error(elem(&1, 0)))) ++
-        [
-          non_whitespace(at: "error", also_ignore: [?], ?,])
-          |> post_traverse({PostProcessors, :set_context, [{:found_error?, true}]})
-        ]
+    |> concat(
+      choice([
+        ignore(string(":"))
+        |> ignore(whitespace(min: 1))
+        |> choice(
+          Enum.map(key_value_children(), &ignore(strip_one_of_error(elem(&1, 0)))) ++
+            [
+              non_whitespace(at: "error", also_ignore: [?], ?,])
+              |> post_traverse({PostProcessors, :set_context, [{:found_error?, true}]})
+            ]
+        ),
+        utf8_char([])
+        |> reduce({List, :to_string, []})
+        |> post_traverse({PostProcessors, :set_context, [{:found_error?, true}]})
+      ])
     )
 
   defparsec(

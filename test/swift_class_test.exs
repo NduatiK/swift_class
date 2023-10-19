@@ -4,7 +4,7 @@ defmodule SwiftClassTest do
   alias SwiftClass.Helpers.HelperFunctionsTest
 
   def parse(input) do
-    {:ok, output, _, _, _, _} = SwiftClass.parse(input,content: [file: __ENV__.file])
+    {:ok, output, _, _, _, _} = SwiftClass.parse(input, content: [file: __ENV__.file])
 
     output
   end
@@ -40,7 +40,6 @@ defmodule SwiftClassTest do
       assert {:error, ":1: error:" <> _, _, _, _, _} =
                SwiftClass.parse(input)
     end
-
 
     test "parses modifier with multiple arguments" do
       input = "background(\"foo\", \"bar\")"
