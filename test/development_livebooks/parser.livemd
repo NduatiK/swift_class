@@ -1,533 +1,1057 @@
-# Untitled notebook
+# Parser
+
+```elixir
+Mix.install([
+  {:nimble_parsec, "~> 1.3"}
+])
+```
 
 ## Section
 
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Parser.Context do
+  alias __MODULE__
+
+  defstruct source: "",
+            errors: [],
+            file: "",
+            # Where in the code does the input start?
+            # Useful for localizing errors when parsing sigil text
+            source_line: 1,
+            # When freezes is greater than 0, do not accept errors
+            freezes: 0
+
+  def prepare_context(rest, args, context, {_line, _offset}, _byte_binary_offset) do
+    {rest, args,
+     Map.put_new(context, :context, %Context{
+       source: rest,
+       file: context[:file] || "",
+       source_line: context[:source_line] || 1
+     })}
+  end
+
+  def is_frozen?(%Context{freezes: freezes}), do: freezes > 0
+  def is_frozen?(%{context: %Context{freezes: freezes}}), do: freezes > 0
+
+  def put_new_error(context, rest, error) do
+    IO.inspect({"put_new_error", rest, error})
+
+    if is_frozen?(context) and not error.forced? do
+      IO.inspect({error}, label: "frozen")
+      context
+    else
+      # IO.inspect({error}, label: "new_error")
+      path = [:context, Access.key(:errors)]
+
+      {_, context} =
+        get_and_update_in(context, path, fn
+          existing_errors -> {[error | existing_errors], [error | existing_errors]}
+        end)
+
+      context
+    end
+  end
+
+  def freeze_context(rest, args, context, {_line, _offset}, _byte_binary_offset) do
+    IO.inspect("freeze_context")
+    {_, context} = get_and_update_in(context, [:context, Access.key(:freezes)], &{&1, &1 + 1})
+    {rest, args, context}
+  end
+
+  def unfreeze_context(rest, args, context, {_line, _offset}, _byte_binary_offset) do
+    IO.inspect("unfreeze_context")
+
+    {_, context} =
+      get_and_update_in(context, [:context, Access.key(:freezes)], &{&1, max(0, &1 - 1)})
+
+    {rest, args, context}
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Parser.Error do
+  alias SwiftClass.Parser.Context
+  alias __MODULE__
+
+  defstruct([
+    :incorrect_text,
+    :show_incorrect_text?,
+    :line,
+    :byte_offset,
+    :error_message,
+    forced?: false
+  ])
+
+  def put_error(
+        rest,
+        args,
+        context,
+        _,
+        _,
+        error_message,
+        opts \\ []
+      )
+
+  def put_error(
+        rest,
+        [] = arg,
+        context,
+        {line, _offset},
+        byte_offset,
+        error_message,
+        opts
+      ) do
+    IO.inspect({[], rest, error_message}, label: "error[0]")
+
+    context =
+      Context.put_new_error(context, rest, %Error{
+        incorrect_text: "",
+        line: line,
+        byte_offset: byte_offset,
+        error_message: error_message,
+        show_incorrect_text?: Keyword.get(opts, :show_incorrect_text?, false),
+        forced?: Keyword.get(opts, :force_error?, false)
+      })
+
+    {rest, arg, context}
+  end
+
+  def put_error(
+        rest,
+        [matched_text | _] = arg,
+        context,
+        {line, _offset},
+        byte_offset,
+        error_message,
+        opts
+      ) do
+    IO.inspect({matched_text, rest, error_message}, label: "error[0]")
+
+    context =
+      Context.put_new_error(context, rest, %Error{
+        incorrect_text: matched_text,
+        line: line,
+        byte_offset: byte_offset,
+        error_message: error_message,
+        show_incorrect_text?: Keyword.get(opts, :show_incorrect_text?) || false,
+        forced?: Keyword.get(opts, :force_error?, false)
+      })
+
+    # |> IO.inspect()
+
+    {rest, arg, context}
+  end
+
+  def context_to_error_message(context) do
+    [%Error{} = error | _] = Enum.reverse(context.errors)
+
+    error_message = error.error_message
+    line = error.line
+    incorrect_text = error.incorrect_text
+    byte_offset = error.byte_offset
+
+    source_line = (context.source_line || 1) + line - 1
+
+    error_text_length = String.length(incorrect_text)
+
+    before = String.slice(context.source, 0, max(0, byte_offset - error_text_length))
+    middle = String.slice(context.source, byte_offset - error_text_length, error_text_length)
+    middle = if(middle == " ", do: "_", else: middle)
+    # middle = if(middle == "", do: "▮", else: middle)
+    after_ = String.slice(context.source, byte_offset..-1//1)
+
+    source_lines =
+      [
+        before,
+        IO.ANSI.format([:red, middle]),
+        case {after_, middle} do
+          {"", ""} ->
+            IO.ANSI.format([:red, "_"])
+
+          _ ->
+            after_
+        end
+      ]
+      |> IO.iodata_to_binary()
+      |> String.split("\n")
+
+    error_lines =
+      [
+        String.replace(before, ~r/([^\n])/, " "),
+        IO.ANSI.format([:red, String.replace(middle, ~r/[^\n]/, "^")]),
+        String.replace(after_, ~r/([^\n])/, " ")
+      ]
+      |> IO.iodata_to_binary()
+      |> String.split("\n")
+
+    max_line_number = "#{source_line + Enum.count(error_lines) - 1}"
+    line_spacer = String.duplicate(" ", String.length(max_line_number))
+
+    lines =
+      Enum.zip(source_lines, error_lines)
+      |> Enum.with_index(source_line)
+      |> Enum.map(fn {{s_l, e_l}, line_num} ->
+        """
+        #{line_num} | #{s_l}
+        #{line_spacer} | #{e_l}
+        """
+        |> String.trim()
+      end)
+      |> Enum.join("\n")
+
+    maybe_but_got =
+      if error.show_incorrect_text? do
+        if String.ends_with?(error_message, "\n") do
+          "\nbut got ‘#{incorrect_text}’"
+        else
+          ", but got ‘#{incorrect_text}’"
+        end
+      else
+        ""
+      end
+
+    """
+    #{context.file || ""}:#{source_line}: error:
+    Unsupported input:
+    #{line_spacer} |
+    #{lines}
+    #{line_spacer} |
+
+    #{error_message}#{maybe_but_got}
+    """
+    |> String.trim()
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Parser.Annotation do
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
 ```elixir
 defmodule SwiftClass.Parser do
-  def strip_one_of_error({combinator, label}) when is_list(combinator) and is_binary(label) do
-    {strip_one_of_error(combinator), label}
+  import NimbleParsec
+  alias __MODULE__
+  alias __MODULE__.Context
+
+  def label_from_named_choices(named_choices) do
+    {_, names} = Enum.unzip(named_choices)
+
+    names
+    |> Enum.map(&(" - " <> &1))
+    |> Enum.join("\n")
   end
 
-  def strip_one_of_error(combinator) when is_list(combinator) do
-    Enum.map(combinator, fn part ->
-      case part do
-        {:choice, args, extra} ->
-          case Enum.reverse(args) do
-            [
-              [
-                {:traverse, _, :post,
-                 [
-                   {NimbleParsec, :__post_traverse__,
-                    [
-                      {SwiftClass.PostProcessors, :throw_unexpected, _}
-                    ]}
-                 ]}
-              ]
-              | other
-            ] ->
-              IO.inspect("match")
-              {:choice, Enum.reverse(other), extra}
+  def one_of(combinator \\ empty(), named_choices, opts \\ []) do
+    if not match?([_, _ | _], named_choices) do
+      raise ArgumentError, "one_of expects two or more choices"
+    end
 
-            _ ->
-              strip_one_of_error(part)
-          end
+    error_parser = Keyword.get(opts, :error_parser, non_whitespace())
+    show_incorrect_text? = Keyword.get(opts, :show_incorrect_text?, non_whitespace())
+    generate_error? = Keyword.get(opts, :generate_error?, true)
 
-        _ ->
-          strip_one_of_error(part)
+    {choices, _} = Enum.unzip(named_choices)
+
+    # 
+    choice(
+      combinator,
+      choices ++
+        if generate_error? do
+          [
+            error_parser
+            |> put_error(
+              "Expected one of the following:\n" <>
+                label_from_named_choices(named_choices) <> "\n",
+              show_incorrect_text?: show_incorrect_text?
+            )
+          ]
+        else
+          []
+        end
+    )
+  end
+
+  def expected(combinator \\ empty(), combinator_2, opts) do
+    error_parser = Keyword.get(opts, :error_parser, non_whitespace())
+    error_message = Keyword.get(opts, :error_message)
+    generate_error? = Keyword.get(opts, :generate_error?, true)
+
+    combinator
+    |> concat(
+      if generate_error? do
+        choice([
+          combinator_2,
+          put_error(error_parser, error_message, opts)
+        ])
+      else
+        combinator_2
       end
-    end)
+    )
   end
 
-  def strip_one_of_error(other), do: other
+  def optional2(combinator \\ empty(), combinator_2) do
+    combinator
+    |> optional(combinator_2)
+    |> pre_traverse({Parser.Context, :freeze_context, []})
+    |> post_traverse({Parser.Context, :unfreeze_context, []})
+  end
+
+  def put_error(error_parser, error_message, opts \\ []) do
+    error_parser
+    |> post_traverse({Parser.Error, :put_error, [error_message, opts]})
+  end
+
+  def start() do
+    pre_traverse(empty(), {Parser.Context, :prepare_context, []})
+  end
+
+  @whitespace_chars [?\s, ?\t, ?\n, ?\r]
+
+  def non_whitespace(opts \\ []) do
+    also_ignore = Keyword.get(opts, :also_ignore, [])
+
+    repeat_until(utf8_char([]), @whitespace_chars ++ also_ignore)
+    |> reduce({List, :to_string, []})
+    |> post_traverse({__MODULE__, :delete_if_empty_string, []})
+  end
+
+  def delete_if_empty_string(rest, [""], context, _, _) do
+    {rest, [], context}
+  end
+
+  def delete_if_empty_string(rest, args, context, _, _) do
+    {rest, args, context}
+  end
+
+  def repeat_until(combinator, matches) do
+    repeat_while(combinator, {Parser, :not_match, [matches]})
+  end
+
+  def not_match(<<char::utf8, _::binary>>, context, _, _, matches) do
+    if char in matches do
+      {:halt, context}
+    else
+      {:cont, context}
+    end
+  end
+
+  def not_match("", context, _, _, _) do
+    {:cont, context}
+  end
+
+  def error_from_result(result) do
+    case result do
+      {_, _output, rest, %{context: %Context{errors: [_ | _]} = context}, c, d} ->
+        {:error, SwiftClass.Parser.Error.context_to_error_message(context), rest, context, c, d}
+
+      result ->
+        result
+    end
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Tokens do
+  import NimbleParsec
+  import SwiftClass.Parser
+  alias SwiftClass.PostProcessors
+
+  def boolean() do
+    choice([
+      replace(string("true"), true),
+      replace(string("false"), false)
+    ])
+  end
+
+  def nil_(), do: replace(string("nil"), nil)
+
+  def minus(), do: string("-")
+
+  def int() do
+    optional(minus())
+    |> concat(integer(min: 1))
+    |> lookahead_not(ascii_char([?a..?z, ?A..?Z, ?_]))
+    |> reduce({Enum, :join, [""]})
+    |> map({String, :to_integer, []})
+  end
+
+  def frac() do
+    concat(string("."), integer(min: 1))
+  end
+
+  def float() do
+    int()
+    |> concat(frac())
+    |> lookahead(whitespace(min: 1))
+    |> reduce({Enum, :join, [""]})
+    |> map({String, :to_float, []})
+  end
+
+  def word() do
+    ascii_string([?a..?z, ?A..?Z, ?_], 1)
+    |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+    |> reduce({Enum, :join, [""]})
+  end
+
+  def atom() do
+    ignore(string(":"))
+    |> concat(word())
+    |> map({String, :to_atom, []})
+  end
+
+  def double_quoted_string() do
+    ignore(string(~s(")))
+    |> repeat(
+      lookahead_not(ascii_char([?"]))
+      |> choice([string(~s(\")), utf8_char([])])
+    )
+    |> ignore(string(~s(")))
+    |> reduce({List, :to_string, []})
+  end
+
+  @whitespace_chars [?\s, ?\n, ?\r, ?\t]
+  def whitespace(opts) do
+    utf8_string(@whitespace_chars, opts)
+  end
+
+  def whitespace_except(exception, opts) do
+    utf8_string(Enum.reject(@whitespace_chars, &(<<&1>> == exception)), opts)
+  end
+
+  def ignore_whitespace(combinator \\ empty()) do
+    combinator |> ignore(optional(whitespace(min: 1)))
+  end
+
+  #
+  # AST
+  #
+
+  def variable(opts \\ []) do
+    expected(
+      ascii_string([?a..?z, ?A..?Z, ?_], 1)
+      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+      |> reduce({Enum, :join, [""]})
+      |> post_traverse({PostProcessors, :to_elixir_variable_ast, []}),
+      Keyword.merge(
+        [error_message: "expected a variable"],
+        opts
+      )
+    )
+  end
+
+  def literal(opts \\ []) do
+    one_of(
+      empty(),
+      [
+        {float(), "float"},
+        {int(), "int"},
+        {boolean(), "boolean"},
+        {nil_(), "nil"},
+        {atom(), "atom"},
+        {double_quoted_string(), "string"}
+      ],
+      Keyword.merge([show_incorrect_text?: true], opts)
+    )
+  end
+
+  def modifier_name() do
+    expected(
+      ascii_string([?a..?z, ?A..?Z, ?_], 1)
+      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+      |> reduce({Enum, :join, [""]}),
+      error_message: "Expected a modifier name",
+      show_incorrect_text?: true
+    )
+  end
+
+  def module_name() do
+    expected(
+      ascii_string([?A..?Z], 1)
+      |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
+      |> reduce({Enum, :join, [""]}),
+      error_message: "Expected a modifier name",
+      show_incorrect_text?: true
+    )
+  end
 end
 ```
 
 ```elixir
-a =
-  [
-    {[
-       {:choice,
-        [
-          [
-            {:traverse,
-             [
-               {:traverse,
-                [
-                  {:traverse,
-                   [
-                     {:traverse,
-                      [
-                        {:choice, [[string: "-"], []], nil},
-                        {:traverse,
-                         [
-                           {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                            [{NimbleParsec, :__compile_integer__, [1]}]},
-                           {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                            {NimbleParsec, :__cont_context__, []}, nil}
-                         ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
-                      ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-                   ], :post,
-                   [
-                     {NimbleParsec, :__map__,
-                      [
-                        {:var, [], NimbleParsec},
-                        {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
-                      ]}
-                   ]},
-                  {:string, "."},
-                  {:traverse,
-                   [
-                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                      [{NimbleParsec, :__compile_integer__, [1]}]},
-                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                      {NimbleParsec, :__cont_context__, []}, nil}
-                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
-                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_float]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse,
-                [
-                  {:choice, [[string: "-"], []], nil},
-                  {:traverse,
-                   [
-                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                      [{NimbleParsec, :__compile_integer__, [1]}]},
-                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                      {NimbleParsec, :__cont_context__, []}, nil}
-                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]}
-                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:choice,
-             [
-               [
-                 {:traverse, [string: "true"], :constant,
-                  [{NimbleParsec, :__constant__, [[true]]}]}
-               ],
-               [
-                 {:traverse, [string: "false"], :constant,
-                  [{NimbleParsec, :__constant__, [[false]]}]}
-               ]
-             ], nil}
-          ],
-          [
-            {:traverse, [string: "nil"], :constant, [{NimbleParsec, :__constant__, [[nil]]}]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-               {:choice,
-                [
-                  [
-                    {:label,
-                     [
-                       {:traverse,
-                        [
-                          {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}],
-                           :post,
-                           [
-                             {NimbleParsec, :__compile_string__,
-                              [1, {:integer, [], NimbleParsec}]}
-                           ]},
-                          {:traverse,
-                           [
-                             {:repeat,
-                              [
-                                {:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}
-                              ], {NimbleParsec, :__cont_context__, []}, nil}
-                           ], :post,
-                           [
-                             {NimbleParsec, :__runtime_string__,
-                              [0, nil, {:integer, [], NimbleParsec}]}
-                           ]}
-                        ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-                     ], "ASCII letter or underscore followed zero or more"}
-                  ],
-                  [
-                    {:traverse,
-                     [
-                       {:traverse,
-                        [
-                          {:repeat, [{:bin_segment, [], [], :utf8}],
-                           {NimbleParsec, :__repeat_while__,
-                            [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
-                        ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-                     ], :post,
-                     [
-                       {NimbleParsec, :__post_traverse__,
-                        [
-                          {SwiftClass.PostProcessors, :throw_unexpected,
-                           ["a function or variable name", false]}
-                        ]}
-                     ]}
-                  ]
-                ], nil}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_atom]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-               {:repeat,
-                [
-                  {:lookahead, [{:bin_segment, ~c"\"", [], :integer}], :negative},
-                  {:choice, [[string: "\""], [{:bin_segment, [], [], :utf8}]], nil}
-                ], {NimbleParsec, :__cont_context__, []}, nil},
-               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]}
-             ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse,
-                [
-                  {:repeat, [{:bin_segment, [], [], :utf8}],
-                   {NimbleParsec, :__repeat_while__,
-                    [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
-                ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-             ], :post,
-             [
-               {NimbleParsec, :__post_traverse__,
-                [
-                  {SwiftClass.PostProcessors, :throw_unexpected,
-                   [
-                     "one of the following:\n - float\n - int\n - boolean\n - nil\n - atom\n - string\n",
-                     false
-                   ]}
-                ]}
-             ]}
-          ]
-        ], nil}
-     ], "a number, string, nil, boolean or :atom"},
-    {[parsec: :key_value_pairs], "a list of key_value_pairs eg ‘style: [lineWidth: 1]’"},
-    {[parsec: :nested_attribute], "another attribute eg ‘foo(bar())’"},
-    {[parsec: :ime], "an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’"},
-    {[
-       {:traverse,
-        [
-          {:traverse,
-           [
-             {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
-              [
-                {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
-              ]},
-             {:traverse,
-              [
-                {:repeat, [{:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}],
-                 {NimbleParsec, :__cont_context__, []}, nil}
-              ], :post,
-              [
-                {NimbleParsec, :__runtime_string__, [0, nil, {:integer, [], NimbleParsec}]}
-              ]}
-           ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-        ], :post,
-        [
-          {NimbleParsec, :__post_traverse__,
-           [{SwiftClass.PostProcessors, :to_elixir_variable_ast, []}]}
-        ]}
-     ], "a variable defined in the class header eg ‘color_name’"}
+defmodule SwiftClass.PostProcessors do
+  # PostProcessors
+  def to_attr_ast(rest, [[attr], "attr"], context, {_line, _offset}, _binary_offset)
+      when is_binary(attr) do
+    {rest, [{:__attr__, [], attr}], context}
+  end
+
+  def wrap_in_tuple(rest, args, context, {_line, _offset}, _binary_offset) do
+    {rest, [List.to_tuple(Enum.reverse(args))], context}
+  end
+
+  def block_open_with_variable_to_ast(
+        rest,
+        [variable, string],
+        context,
+        {_line, _offset},
+        _binary_offset
+      ) do
+    {rest,
+     [
+       {:<>, [context: Elixir, imports: [{2, Kernel}]], [string, variable]}
+     ], context}
+  end
+
+  def tag_as_elixir_code(rest, [quotable], context, {_line, _offset}, _binary_offset) do
+    {rest, [{Elixir, [], quotable}], context}
+  end
+
+  def to_elixir_variable_ast(rest, [variable_name], context, _line, _offset) do
+    {rest, [{Elixir, [], {String.to_atom(variable_name), [], Elixir}}], context}
+  end
+
+  def to_implicit_ime_ast(rest, [[], variable_name], context, _line, _offset, _is_initial = true) do
+    {rest, [{:., [], [nil, String.to_atom(variable_name)]}], context}
+  end
+
+  def to_implicit_ime_ast(
+        rest,
+        [args, variable_name],
+        context,
+        _line,
+        _offset,
+        _is_initial = true
+      ) do
+    {rest, [{:., [], [nil, {String.to_atom(variable_name), [], args}]}], context}
+  end
+
+  def to_implicit_ime_ast(rest, [[], variable_name], context, _line, _offset, false) do
+    {rest, [String.to_atom(variable_name)], context}
+  end
+
+  def to_implicit_ime_ast(rest, [args, variable_name], context, _line, _offset, false) do
+    {rest, [{String.to_atom(variable_name), [], args}], context}
+  end
+
+  def to_scoped_ime_ast(rest, [[] = _args, variable_name, scope], context, _line, _offset) do
+    {rest, [String.to_atom(variable_name), String.to_atom(scope)], context}
+  end
+
+  def to_scoped_ime_ast(rest, [args, variable_name, scope], context, _line, _offset) do
+    {rest, [{String.to_atom(variable_name), [], args}, String.to_atom(scope)], context}
+  end
+
+  defp combine_chain_ast_parts({:., [], [nil, part]}, inner) do
+    {:., [], [nil, {:., [], [part, inner]}]}
+  end
+
+  defp combine_chain_ast_parts(outer, inner) do
+    {:., [], [outer, inner]}
+  end
+
+  def chain_ast(rest, sections, context, _line, _offset) do
+    sections = Enum.reduce(sections, &combine_chain_ast_parts/2)
+
+    {rest, [sections], context}
+  end
+
+  def to_function_call_ast(rest, args, context, _line, _offset) do
+    [ast_name | other_args] = Enum.reverse(args)
+
+    {rest, [{String.to_atom(ast_name), [], other_args}], context}
+  end
+
+  def to_ime_function_call_ast(
+        rest,
+        [{Elixir, [], variable}],
+        context,
+        _line,
+        _offset,
+        _is_initial = true
+      ) do
+    {rest, [{:., [], [nil, {Elixir, [], {:to_ime, [], [variable]}}]}], context}
+  end
+
+  def to_ime_function_call_ast(
+        rest,
+        [{Elixir, [], variable}],
+        context,
+        _line,
+        _offset,
+        _is_initial = false
+      ) do
+    {rest, [{Elixir, [], {:to_ime, [], [variable]}}], context}
+  end
+
+  def to_ime_function_call_ast(
+        rest,
+        _,
+        context,
+        _line,
+        _offset,
+        _
+      ) do
+    {rest, [{Elixir, [], {:to_ime, [], []}}], context}
+  end
+
+  def to_keyword_tuple_ast(rest, [arg1, arg2], context, {_line, _offset}, _binary_offset) do
+    {rest, [{String.to_atom(arg2), arg1}], context}
+  end
+
+  def tag_as_content(rest, [content], context, {_line, _offset}, _binary_offset) do
+    {rest, [content: content], context}
+  end
+
+  def tag_as_content(rest, content, context, {_line, _offset}, _binary_offset) do
+    {rest, [content: Enum.reverse(content)], context}
+  end
+
+  def block_open_to_ast(rest, [class_name], context, {_line, _offset}, _binary_offset) do
+    {rest, [[class_name, {:_target, [], Elixir}]], context}
+  end
+
+  def block_open_to_ast(
+        rest,
+        [key_value_pairs, class_name],
+        context,
+        {_line, _offset},
+        _binary_offset
+      ) do
+    {rest, [[class_name, key_value_pairs]], context}
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Expressions do
+  import NimbleParsec
+  import SwiftClass.Parser
+  import SwiftClass.Tokens
+  alias SwiftClass.PostProcessors
+
+  def enclosed(start \\ empty(), open, combinator, close, opts) do
+    allow_empty? = Keyword.get(opts, :allow_empty?, true)
+
+    close =
+      expected(
+        ignore(string(close)),
+        error_message: "expected ‘#{close}’",
+        error_parser: optional(non_whitespace())
+      )
+
+    start
+    |> ignore(string(open))
+    |> ignore_whitespace()
+    |> concat(
+      if allow_empty? do
+        optional2(combinator)
+      else
+        combinator
+      end
+    )
+    |> ignore_whitespace()
+    |> concat(close)
+    |> ignore_whitespace()
+  end
+
+  #
+  # Collections
+  #
+
+  def comma_separated_list(start \\ empty(), elem_combinator, opts \\ []) do
+    delimiter_separated_list(
+      start,
+      elem_combinator,
+      ",",
+      Keyword.merge([allow_empty?: true], opts)
+    )
+  end
+
+  defp delimiter_separated_list(combinator, elem_combinator, delimiter, opts) do
+    generate_error? = Keyword.get(opts, :generate_error?, true)
+    allow_empty? = Keyword.get(opts, :allow_empty?, true)
+
+    #  1+ elems
+    non_empty =
+      elem_combinator
+      |> repeat(
+        ignore_whitespace()
+        |> ignore(string(delimiter))
+        |> ignore_whitespace()
+        |> concat(elem_combinator)
+      )
+
+    if allow_empty? do
+      combinator
+      |> optional2(non_empty)
+    else
+      combinator
+      |> concat(non_empty)
+    end
+
+    # end
+  end
+
+  def key_value_children(generate_error?) do
+    [
+      {literal(error_parser: empty(), generate_error?: generate_error?),
+       ~s'a number, string, nil, boolean or :atom'},
+      {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+      # {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
+      # {parsec(:key_value_list),
+      #  ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
+      {variable(generate_error?: generate_error?),
+       ~s|a variable defined in the class header eg ‘color_name’|}
+    ]
+  end
+
+  def key_value_pair() do
+    ignore_whitespace()
+    |> concat(word())
+    |> concat(ignore(string(":")))
+    |> ignore(whitespace(min: 1))
+    |> one_of(
+      key_value_children(false),
+      error_parser: non_whitespace(also_ignore: String.to_charlist("),"))
+    )
+    |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
+  end
+
+  def key_value_pairs(opts \\ []) do
+    comma_separated_list(
+      empty(),
+      key_value_pair(),
+      opts
+    )
+    |> wrap()
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Modifier do
+  import NimbleParsec
+  import SwiftClass.Expressions
+  import SwiftClass.Tokens
+  import SwiftClass.Parser
+  alias SwiftClass.PostProcessors
+
+  implicit_ime = fn is_initial ->
+    ignore(string("."))
+    |> concat(word())
+    |> wrap(
+      choice([
+        ignore(string("()")),
+        lookahead(utf8_char(String.to_charlist(".)")))
+        |> concat(empty()),
+        parsec(:modifier_brackets)
+      ])
+    )
+    |> post_traverse({PostProcessors, :to_implicit_ime_ast, [is_initial]})
+  end
+
+  # Foo.bar
+  # Foo.baz(0.1)
+  scoped_ime =
+    module_name()
+    |> ignore(string("."))
+    |> concat(word())
+    |> wrap(
+      choice([
+        ignore(string("()")),
+        lookahead(utf8_char(String.to_charlist(".)")))
+        |> concat(empty()),
+        parsec(:modifier_brackets)
+      ])
+    )
+    |> post_traverse({PostProcessors, :to_scoped_ime_ast, []})
+
+  ime_function = fn is_initial ->
+    if is_initial do
+      empty()
+    else
+      ignore(string("."))
+    end
+    |> ignore(string("to_ime"))
+    |> enclosed(
+      "(",
+      variable(
+        force_error?: true,
+        error_message: "Expected a variable",
+        error_parser: non_whitespace(also_ignore: String.to_charlist(")"))
+      )
+      |> post_traverse({PostProcessors, :to_ime_function_call_ast, [is_initial]}),
+      ")",
+      []
+    )
+  end
+
+  defcombinator(
+    :ime,
+    choice([
+      # Scoped
+      # Color.red
+      scoped_ime,
+      # to_ime(color)
+      ime_function.(true),
+      # Implicit
+      # .red
+      implicit_ime.(true)
+    ])
+    # scoped_ime
+    |> repeat(
+      choice([
+        # <other_ime>.to_ime(color)
+        ime_function.(false),
+        # <other_ime>.red
+        implicit_ime.(false)
+      ])
+    )
+    |> post_traverse({PostProcessors, :chain_ast, []})
+  )
+
+  @modifier_arguments [
+    {
+      literal(error_parser: empty(), generate_error?: false),
+      ~s'a number, string, nil, boolean or :atom'
+    },
+    {
+      key_value_pairs(generate_error?: false, allow_empty?: false),
+      ~s'a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’'
+    },
+    # {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
+    {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+    {
+      variable(generate_error?: false),
+      ~s|a variable defined in the class header eg ‘color_name’|
+    }
   ]
 
-:ok
+  defcombinator(
+    :modifier_arguments,
+    # ignore_whitespace()
+    # |> one_of(@modifier_arguments.(true))
+    empty()
+    |> comma_separated_list(
+      one_of(empty(), @modifier_arguments,
+        error_parser: non_whitespace(also_ignore: String.to_charlist(")"))
+      ),
+      allow_empty?: false,
+      error_message:
+        """
+        Expected ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of: 
+        #{label_from_named_choices(@modifier_arguments)}
+        """
+        |> String.trim()
+    )
+  )
+
+  defcombinator(
+    :modifier_brackets,
+    # enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
+    expected(
+      choice([
+        ignore(string("()")),
+        enclosed(
+          "(",
+          parsec(:modifier_arguments),
+          ")",
+          allow_empty?: true
+        )
+      ]),
+      error_message:
+        """
+        Expected ‘()’ or ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of: 
+        #{label_from_named_choices(@modifier_arguments)}
+        """
+        |> String.trim()
+    )
+  )
+
+  defparsec(
+    :modifier,
+    SwiftClass.Parser.start()
+    |> ignore_whitespace()
+    |> concat(modifier_name())
+    |> parsec(:modifier_brackets)
+    |> post_traverse({PostProcessors, :to_function_call_ast, []}),
+    # |> parsec(:modifier_brackets)
+    export_combinator: true
+  )
+end
 ```
 
-```elixir
-SwiftClass.Parser.strip_one_of_error(a)
+<!-- livebook:{"reevaluate_automatically":true} -->
 
-:ok
+```elixir
+ExUnit.start(autorun: false, exclude: [:skip])
+
+defmodule TestHelpers do
+  def inspect_result(result) do
+    # context = elem(result, 3) |> IO.inspect()
+
+    result = elem(result, 1)
+
+    IO.puts(if(is_binary(result), do: result, else: inspect(result)))
+  end
+end
+
+defmodule TestTokens do
+  import NimbleParsec
+  import SwiftClass.Modifier
+  import TestHelpers
+  use ExUnit.Case, async: true
+
+  defparsec(
+    :variables,
+    SwiftClass.Parser.start()
+    |> concat(SwiftClass.Tokens.variable())
+  )
+
+  test "variable errors" do
+    """
+    sa
+    """
+    |> String.trim()
+    |> variables(context: [file: __ENV__.file, source_line: 23])
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+
+  defparsec(
+    :optional_literals,
+    SwiftClass.Parser.start()
+    # |> concat(SwiftClass.Tokens.literal(error_parser: empty()))
+    |> concat(
+      SwiftClass.Parser.optional2(empty(), SwiftClass.Tokens.literal(error_parser: empty()))
+    )
+    # |> concat(empty())
+  )
+
+  @tag :skip
+
+  test "optional literal errors" do
+    """
+
+    """
+    |> String.trim()
+    |> optional_literals(context: [file: __ENV__.file, source_line: 23])
+    # |> IO.inspect()
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+
+  defparsec(
+    :modifier_name,
+    SwiftClass.Parser.start()
+    |> concat(SwiftClass.Tokens.modifier_name())
+  )
+
+  @tag :skip
+
+  test "modifier_name" do
+    """
+    blue
+    """
+    |> String.trim()
+    |> modifier_name(context: [file: __ENV__.file, source_line: 23])
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+
+  defparsec(
+    :literals,
+    SwiftClass.Parser.start()
+    |> concat(SwiftClass.Tokens.literal())
+  )
+
+  @tag :skip
+
+  test "literal errors" do
+    """
+    a1
+    """
+    |> String.trim()
+    |> literals(context: [file: __ENV__.file, source_line: 23])
+    |> IO.inspect()
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+
+  defparsec(
+    :imes,
+    SwiftClass.Parser.start()
+    |> concat(parsec(:ime))
+  )
+
+  test "literal errors(23)" do
+    """
+    Color.red()
+    """
+    |> String.trim()
+    |> imes(context: [file: __ENV__.file, source_line: 23])
+    |> IO.inspect()
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+end
+
+ExUnit.run()
 ```
 
-```elixir
-hd(a)
-```
+<!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
-IO.puts("""
-"file.ex:1: error:\n    Not valid: ‘(.foo.bar.baz(1,’\n    The parser does not support the following:\n  |\n1 | color\e[31m(.foo.bar.baz(1,\e[0m 2).qux)\n  |\n\nExpected \"(<CHILD>)\"\n\twhere <CHILD> is a \",\" separated sequence containing one of the following: \n\t\n\t - a number, string, nil, boolean or :atom\n\t - a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’\n\t - another attribute eg ‘foo(bar())’\n\t - an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’\n\t - a variable defined in the class header eg ‘color_name’\n\t\n", " 2).qux)", %{line: %{}, source: "color(.foo.bar.baz(1, 2).qux)"}
-""")
-```
+ExUnit.start(autorun: false, exclude: [:skip])
 
-```elixir
-{[parsec: :key_value_pairs],
- "a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’"}
-```
+defmodule TestModifiers do
+  use ExUnit.Case, async: true
+  # import NimbleParsec
+  import TestHelpers
+  # defparsec(
+  #   :literals,
+  #   SwiftClass.Parser.start()
+  #   |> concat(SwiftClass.Tokens.literal())
+  # )
 
-```elixir
-[
-  {:choice,
-   [
-     [
-       {:choice,
-        [
-          [
-            {:traverse,
-             [
-               {:traverse,
-                [
-                  {:traverse,
-                   [
-                     {:traverse,
-                      [
-                        {:choice, [[string: "-"], []], nil},
-                        {:traverse,
-                         [
-                           {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                            [{NimbleParsec, :__compile_integer__, [1]}]},
-                           {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                            {NimbleParsec, :__cont_context__, []}, nil}
-                         ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
-                        {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}],
-                         :negative}
-                      ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-                   ], :post,
-                   [
-                     {NimbleParsec, :__map__,
-                      [
-                        {:var, [], NimbleParsec},
-                        {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
-                      ]}
-                   ]},
-                  {:string, "."},
-                  {:traverse,
-                   [
-                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                      [{NimbleParsec, :__compile_integer__, [1]}]},
-                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                      {NimbleParsec, :__cont_context__, []}, nil}
-                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
-                  {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :negative}
-                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_float]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse,
-                [
-                  {:choice, [[string: "-"], []], nil},
-                  {:traverse,
-                   [
-                     {:traverse, [{:bin_segment, [48..57], [], :integer}], :post,
-                      [{NimbleParsec, :__compile_integer__, [1]}]},
-                     {:repeat, [{:bin_segment, [48..57], [], :integer}],
-                      {NimbleParsec, :__cont_context__, []}, nil}
-                   ], :post, [{NimbleParsec, :__runtime_integer__, [1, nil]}]},
-                  {:lookahead, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :negative}
-                ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_integer]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:choice,
-             [
-               [
-                 {:traverse, [string: "true"], :constant,
-                  [{NimbleParsec, :__constant__, [[true]]}]}
-               ],
-               [
-                 {:traverse, [string: "false"], :constant,
-                  [{NimbleParsec, :__constant__, [[false]]}]}
-               ]
-             ], nil}
-          ],
-          [
-            {:traverse, [string: "nil"], :constant, [{NimbleParsec, :__constant__, [[nil]]}]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-               {:choice,
-                [
-                  [
-                    {:traverse,
-                     [
-                       {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
-                        [
-                          {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
-                        ]},
-                       {:traverse,
-                        [
-                          {:repeat,
-                           [
-                             {:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}
-                           ], {NimbleParsec, :__cont_context__, []}, nil}
-                        ], :post,
-                        [
-                          {NimbleParsec, :__runtime_string__,
-                           [0, nil, {:integer, [], NimbleParsec}]}
-                        ]}
-                     ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-                  ],
-                  [
-                    {:traverse,
-                     [
-                       {:traverse,
-                        [
-                          {:repeat, [{:bin_segment, [], [], :utf8}],
-                           {NimbleParsec, :__repeat_while__,
-                            [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]}, nil}
-                        ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-                     ], :post,
-                     [
-                       {NimbleParsec, :__post_traverse__,
-                        [
-                          {SwiftClass.PostProcessors, :throw_unexpected,
-                           ["a function or variable name", false]}
-                        ]}
-                     ]}
-                  ]
-                ], nil}
-             ], :post,
-             [
-               {NimbleParsec, :__map__,
-                [
-                  {:var, [], NimbleParsec},
-                  {{:., [], [String, :to_atom]}, [], [{:var, [], NimbleParsec}]}
-                ]}
-             ]}
-          ],
-          [
-            {:traverse,
-             [
-               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-               {:repeat,
-                [
-                  {:lookahead, [{:bin_segment, ~c"\"", [], :integer}], :negative},
-                  {:choice, [[string: "\""], [{:bin_segment, [], [], :utf8}]], nil}
-                ], {NimbleParsec, :__cont_context__, []}, nil},
-               {:traverse, [string: "\""], :constant, [{NimbleParsec, :__constant__, [[]]}]}
-             ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-          ]
-        ], nil}
-     ],
-     [
-       {:traverse,
-        [
-          {:traverse,
-           [
-             {:repeat, [{:bin_segment, [], [], :utf8}],
-              {NimbleParsec, :__repeat_while__, [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]},
-              nil}
-           ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-        ], :post,
-        [
-          {NimbleParsec, :__post_traverse__,
-           [
-             {SwiftClass.PostProcessors, :throw_unexpected,
-              ["one of the following:\n - a number, string, nil, boolean or :atom\n", false]}
-           ]}
-        ]}
-     ]
-   ], nil},
-  {:traverse,
-   [
-     {:traverse,
-      [
-        {:traverse, [{:bin_segment, ~c" \n\r\t", [], :utf8}], :post,
-         [{NimbleParsec, :__compile_string__, [1, {:utf8, [], NimbleParsec}]}]},
-        {:repeat, [{:bin_segment, ~c" \n\r\t", [], :utf8}], {NimbleParsec, :__cont_context__, []},
-         nil}
-      ], :post, [{NimbleParsec, :__runtime_string__, [1, nil, {:utf8, [], NimbleParsec}]}]}
-   ], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-  {:traverse, [string: ":"], :constant, [{NimbleParsec, :__constant__, [[]]}]},
-  {:choice,
-   [
-     [
-       {:traverse,
-        [
-          {:traverse, [{:bin_segment, [97..122, 65..90, 95], [], :integer}], :post,
-           [
-             {NimbleParsec, :__compile_string__, [1, {:integer, [], NimbleParsec}]}
-           ]},
-          {:traverse,
-           [
-             {:repeat, [{:bin_segment, [97..122, 65..90, 48..57, 95], [], :integer}],
-              {NimbleParsec, :__cont_context__, []}, nil}
-           ], :post,
-           [
-             {NimbleParsec, :__runtime_string__, [0, nil, {:integer, [], NimbleParsec}]}
-           ]}
-        ], :post, [{NimbleParsec, :__reduce__, [{Enum, :join, [""]}]}]}
-     ],
-     [
-       {:traverse,
-        [
-          {:traverse,
-           [
-             {:repeat, [{:bin_segment, [], [], :utf8}],
-              {NimbleParsec, :__repeat_while__, [{SwiftClass.Parser, :not_match, [~c" \n\r\t"]}]},
-              nil}
-           ], :post, [{NimbleParsec, :__reduce__, [{List, :to_string, []}]}]}
-        ], :post,
-        [
-          {NimbleParsec, :__post_traverse__,
-           [
-             {SwiftClass.PostProcessors, :throw_unexpected,
-              ["a function or variable name", false]}
-           ]}
-        ]}
-     ]
-   ], nil},
-  {:traverse,
-   [
-     {:choice,
-      [
-        [
-          {:traverse,
-           [
-             {:traverse, [{:bin_segment, ~c" \n\r\t", [], :utf8}], :post,
-              [
-                {NimbleParsec, :__compile_string__, [1, {:utf8, [], NimbleParsec}]}
-              ]},
-             {:repeat, [{:bin_segment, ~c" \n\r\t", [], :utf8}],
-              {NimbleParsec, :__cont_context__, []}, nil}
-           ], :post,
-           [
-             {NimbleParsec, :__runtime_string__, [1, nil, {:utf8, [], NimbleParsec}]}
-           ]}
-        ],
-        []
-      ], nil}
-   ], :constant, [{NimbleParsec, :__constant__, [[]]}]}
-]
+  test "literal errors" do
+    # """
+    # blue(a: 1 
+    # """
+    # "blue(a, n: 1)"
+    # "blue(to_ime(1))"
+    # "blue(Color.red(1, h: 2))"
+    # "color(color: .foo.bar.baz(1, 2).qux)"
+    # "color(color: .foo.bar.baz(1a, 2).qux)"
+
+    "blue(a, 1a)"
+    # "color(color: .foo.bar.baz)"
+    # "color(color: Color.foo)"
+
+    # |> String.trim()
+    |> SwiftClass.Modifier.modifier(context: [file: __ENV__.file, source_line: 23])
+    |> IO.inspect()
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+end
+
+ExUnit.run()
 ```
