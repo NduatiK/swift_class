@@ -34,9 +34,11 @@ defmodule SwiftClass.Parser.Context do
 
   def is_frozen?(%Context{freezes: freezes}), do: freezes > 0
   def is_frozen?(%{context: %Context{freezes: freezes}}), do: freezes > 0
+  def has_error?(%Context{errors: errors}), do: errors != []
+  def has_error?(%{context: %Context{errors: errors}}), do: errors != []
 
   def put_new_error(context, rest, error) do
-    IO.inspect({"put_new_error", rest, error})
+    IO.inspect({"put_new_error", is_frozen?(context), rest, error})
 
     if is_frozen?(context) and not error.forced? do
       IO.inspect({error}, label: "frozen")
@@ -138,7 +140,7 @@ defmodule SwiftClass.Parser.Error do
         line: line,
         byte_offset: byte_offset,
         error_message: error_message,
-        show_incorrect_text?: Keyword.get(opts, :show_incorrect_text?) || false,
+        show_incorrect_text?: Keyword.get(opts, :show_incorrect_text?, false),
         forced?: Keyword.get(opts, :force_error?, false)
       })
 
@@ -258,12 +260,12 @@ defmodule SwiftClass.Parser do
     end
 
     error_parser = Keyword.get(opts, :error_parser, non_whitespace())
-    show_incorrect_text? = Keyword.get(opts, :show_incorrect_text?, non_whitespace())
+    show_incorrect_text? = Keyword.get(opts, :show_incorrect_text?, false)
     generate_error? = Keyword.get(opts, :generate_error?, true)
 
     {choices, _} = Enum.unzip(named_choices)
 
-    # 
+    #
     choice(
       combinator,
       choices ++
@@ -302,7 +304,14 @@ defmodule SwiftClass.Parser do
 
   def optional2(combinator \\ empty(), combinator_2) do
     combinator
+    |> post_traverse({Parser.Context, :freeze_context, []})
     |> optional(combinator_2)
+    |> post_traverse({Parser.Context, :unfreeze_context, []})
+  end
+
+  def frozen(combinator \\ empty(), combinator_2) do
+    combinator
+    |> concat(combinator_2)
     |> pre_traverse({Parser.Context, :freeze_context, []})
     |> post_traverse({Parser.Context, :unfreeze_context, []})
   end
@@ -320,10 +329,12 @@ defmodule SwiftClass.Parser do
 
   def non_whitespace(opts \\ []) do
     also_ignore = Keyword.get(opts, :also_ignore, [])
+    fail_if_empty = Keyword.get(opts, :fail_if_empty, false)
 
     repeat_until(utf8_char([]), @whitespace_chars ++ also_ignore)
     |> reduce({List, :to_string, []})
     |> post_traverse({__MODULE__, :delete_if_empty_string, []})
+    |> post_traverse({__MODULE__, :fail_if_empty, [fail_if_empty]})
   end
 
   def delete_if_empty_string(rest, [""], context, _, _) do
@@ -331,6 +342,14 @@ defmodule SwiftClass.Parser do
   end
 
   def delete_if_empty_string(rest, args, context, _, _) do
+    {rest, args, context}
+  end
+
+  def fail_if_empty(_, [], _, _, _, true) do
+    {:error, "non_whitespace is empty"}
+  end
+
+  def fail_if_empty(rest, args, context, _, _, _) do
     {rest, args, context}
   end
 
@@ -396,7 +415,7 @@ defmodule SwiftClass.Tokens do
   def float() do
     int()
     |> concat(frac())
-    |> lookahead(whitespace(min: 1))
+    |> lookahead_not(ascii_char([?a..?z, ?A..?Z, ?_]))
     |> reduce({Enum, :join, [""]})
     |> map({String, :to_float, []})
   end
@@ -474,6 +493,12 @@ defmodule SwiftClass.Tokens do
       |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
       |> reduce({Enum, :join, [""]}),
       error_message: "Expected a modifier name",
+      error_parser:
+        choice([
+          non_whitespace(also_ignore: String.to_charlist("[](),"), fail_if_empty: true),
+          non_whitespace(also_ignore: String.to_charlist("]),"), fail_if_empty: true),
+          non_whitespace()
+        ]),
       show_incorrect_text?: true
     )
   end
@@ -483,7 +508,13 @@ defmodule SwiftClass.Tokens do
       ascii_string([?A..?Z], 1)
       |> ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_], min: 0)
       |> reduce({Enum, :join, [""]}),
-      error_message: "Expected a modifier name",
+      error_message: "Expected a module name",
+      error_parser:
+        choice([
+          non_whitespace(also_ignore: String.to_charlist("[](),"), fail_if_empty: true),
+          non_whitespace(also_ignore: String.to_charlist("]),"), fail_if_empty: true),
+          non_whitespace()
+        ]),
       show_incorrect_text?: true
     )
   end
@@ -493,7 +524,8 @@ end
 ```elixir
 defmodule SwiftClass.PostProcessors do
   # PostProcessors
-  def to_attr_ast(rest, [[attr], "attr"], context, {_line, _offset}, _binary_offset)
+
+  def to_attr_ast(rest, [attr, "attr"], context, {_line, _offset}, _binary_offset)
       when is_binary(attr) do
     {rest, [{:__attr__, [], attr}], context}
   end
@@ -520,7 +552,7 @@ defmodule SwiftClass.PostProcessors do
   end
 
   def to_elixir_variable_ast(rest, [variable_name], context, _line, _offset) do
-    {rest, [{Elixir, [], {String.to_atom(variable_name), [], Elixir}}], context}
+    {rest, [{String.to_atom(variable_name), [], Elixir}], context}
   end
 
   def to_implicit_ime_ast(rest, [[], variable_name], context, _line, _offset, _is_initial = true) do
@@ -568,10 +600,13 @@ defmodule SwiftClass.PostProcessors do
     {rest, [sections], context}
   end
 
-  def to_function_call_ast(rest, args, context, _line, _offset) do
+  def to_function_call_ast(rest, [_ | _] = args, context, _line, _offset) do
     [ast_name | other_args] = Enum.reverse(args)
-
     {rest, [{String.to_atom(ast_name), [], other_args}], context}
+  end
+
+  def to_function_call_ast(_, [], _, _line, _offset) do
+    {:error, ""}
   end
 
   def to_ime_function_call_ast(
@@ -609,6 +644,10 @@ defmodule SwiftClass.PostProcessors do
 
   def to_keyword_tuple_ast(rest, [arg1, arg2], context, {_line, _offset}, _binary_offset) do
     {rest, [{String.to_atom(arg2), arg1}], context}
+  end
+
+  def to_keyword_tuple_ast(rest, _, context, {_line, _offset}, _binary_offset) do
+    {rest, [{:error, 0}], context}
   end
 
   def tag_as_content(rest, [content], context, {_line, _offset}, _binary_offset) do
@@ -711,10 +750,10 @@ defmodule SwiftClass.Expressions do
     [
       {literal(error_parser: empty(), generate_error?: generate_error?),
        ~s'a number, string, nil, boolean or :atom'},
+      {parsec(:key_value_list),
+       ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
       {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
-      # {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
-      # {parsec(:key_value_list),
-      #  ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
+      {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
       {variable(generate_error?: generate_error?),
        ~s|a variable defined in the class header eg ‘color_name’|}
     ]
@@ -727,7 +766,7 @@ defmodule SwiftClass.Expressions do
     |> ignore(whitespace(min: 1))
     |> one_of(
       key_value_children(false),
-      error_parser: non_whitespace(also_ignore: String.to_charlist("),"))
+      error_parser: non_whitespace(also_ignore: String.to_charlist(")],"))
     )
     |> post_traverse({PostProcessors, :to_keyword_tuple_ast, []})
   end
@@ -746,12 +785,65 @@ end
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
-defmodule SwiftClass.Modifier do
+defmodule SwiftClass.HelperFunctions do
+  @moduledoc false
+  import NimbleParsec
+  import SwiftClass.Tokens
+  import SwiftClass.Expressions
+
+  import SwiftClass.Parser
+  # import SwiftClass.Tokens
+  alias SwiftClass.PostProcessors
+
+  @helper_functions [
+    "to_atom",
+    "to_integer",
+    "to_float",
+    "to_boolean",
+    "camelize",
+    "underscore"
+  ]
+
+  def helper_function(opts \\ []) do
+    additional_functions = Keyword.get(opts, :additional, [])
+    function_names = @helper_functions ++ additional_functions
+
+    start()
+    # start()
+    # |> mark_line(:elixir_code, fn ->
+    #   mark_line(:function, fn ->
+    |> concat(
+      function_names
+      |> Enum.map(&string(&1))
+      |> choice()
+      |> enclosed("(", variable(), ")", [])
+      |> post_traverse({PostProcessors, :to_function_call_ast, []})
+      |> post_traverse({PostProcessors, :tag_as_elixir_code, []})
+    )
+
+    #   end)
+    # end)
+    |> label("a 1-arity helper function (#{Enum.join(function_names, ", ")})")
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule SwiftClass.Modifiers do
   import NimbleParsec
   import SwiftClass.Expressions
   import SwiftClass.Tokens
   import SwiftClass.Parser
   alias SwiftClass.PostProcessors
+
+  defcombinator(
+    :key_value_list,
+    enclosed("[", key_value_pairs(generate_error?: false, allow_empty?: false), "]",
+      allow_empty?: false
+    )
+  )
 
   implicit_ime = fn is_initial ->
     ignore(string("."))
@@ -827,6 +919,42 @@ defmodule SwiftClass.Modifier do
     |> post_traverse({PostProcessors, :chain_ast, []})
   )
 
+  defcombinator(
+    :attr,
+    string("attr")
+    |> enclosed(
+      "(",
+      expected(
+        double_quoted_string(),
+        error_message: "attr expects a string argument"
+      ),
+      ")",
+      []
+    )
+    |> post_traverse({PostProcessors, :to_attr_ast, []})
+  )
+
+  defparsec(
+    :nested_attribute,
+    empty()
+    |> one_of(
+      [
+        {parsec(:attr), "an attribute eg ‘attr(placeholder)’"},
+        #
+        {SwiftClass.HelperFunctions.helper_function(), "a helper function eg ‘to_float(number)"},
+        #
+        {
+          frozen(parsec(:inner_modifier)),
+          "a modifier eg ‘bold()’"
+        },
+        {variable(generate_error?: false),
+         ~s|a variable defined in the class header eg ‘color_name’|}
+      ],
+      error_parser: non_whitespace(also_ignore: String.to_charlist(")]"))
+    ),
+    export_combinator: true
+  )
+
   @modifier_arguments [
     {
       literal(error_parser: empty(), generate_error?: false),
@@ -836,8 +964,8 @@ defmodule SwiftClass.Modifier do
       key_value_pairs(generate_error?: false, allow_empty?: false),
       ~s'a list of keyword pairs eg ‘style: :dashed’, ‘size: 12’ or  ‘style: [lineWidth: 1]’'
     },
-    # {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
     {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+    {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
     {
       variable(generate_error?: false),
       ~s|a variable defined in the class header eg ‘color_name’|
@@ -856,7 +984,7 @@ defmodule SwiftClass.Modifier do
       allow_empty?: false,
       error_message:
         """
-        Expected ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of: 
+        Expected ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of:
         #{label_from_named_choices(@modifier_arguments)}
         """
         |> String.trim()
@@ -868,33 +996,108 @@ defmodule SwiftClass.Modifier do
     # enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
     expected(
       choice([
-        ignore(string("()")),
+        ignore(
+          string("(")
+          |> ignore_whitespace()
+          |> string(")")
+        ),
         enclosed(
           "(",
           parsec(:modifier_arguments),
           ")",
-          allow_empty?: true
+          allow_empty?: false
         )
       ]),
       error_message:
         """
-        Expected ‘()’ or ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of: 
+        Expected ‘()’ or ‘(<modifier_arguments>)’ where <modifier_arguments> are a comma separated list of:
         #{label_from_named_choices(@modifier_arguments)}
         """
         |> String.trim()
     )
   )
 
+  defcombinator(
+    :inner_modifier_brackets,
+    # enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
+    choice([
+      ignore(
+        string("(")
+        |> ignore_whitespace()
+        |> string(")")
+      ),
+      enclosed(
+        "(",
+        parsec(:modifier_arguments),
+        ")",
+        allow_empty?: false
+      )
+    ])
+  )
+
+  defparsec(
+    :inner_modifier,
+    ignore_whitespace()
+    |> concat(modifier_name())
+    |> parsec(:inner_modifier_brackets)
+    |> post_traverse({PostProcessors, :to_function_call_ast, []})
+    # |> parsec(:modifier_brackets)
+  )
+
   defparsec(
     :modifier,
-    SwiftClass.Parser.start()
-    |> ignore_whitespace()
+    ignore_whitespace()
     |> concat(modifier_name())
     |> parsec(:modifier_brackets)
     |> post_traverse({PostProcessors, :to_function_call_ast, []}),
+    export_combinator: true
+
     # |> parsec(:modifier_brackets)
+  )
+
+  defparsec(
+    :modifiers,
+    SwiftClass.Parser.start()
+    |> times(parsec(:modifier), min: 1),
+    # parsec(:modifier),
+    # |> repeat_while(
+    #   choice([
+    #     ignore_whitespace()
+    #     |> eos(),
+    #     parsec(:modifier)
+    #   ]),
+    #   {__MODULE__, :no_error, []}
+    # ),
+
     export_combinator: true
   )
+
+  # defparsec(
+  #   :modifiers,
+  #   SwiftClass.Parser.start()
+  #   |> repeat_while(parsec(:modifier)
+  #   |> ignore_whitespace(), {__MODULE__, :no_error, []}),
+  #   # parsec(:modifier), min: 1),
+  #   # |> expected(eos(),
+  #   #   error_message: "expected nothing after the modifier"
+  #   # ),
+  #   export_combinator: true
+  # )
+
+  def no_error("", context, _, _) do
+    IO.inspect("no_error _hlat")
+    {:halt, context}
+  end
+
+  def no_error(_, context, _, _) do
+    IO.inspect({"no_error", context})
+
+    if SwiftClass.Parser.Context.has_error?(context) do
+      {:halt, context}
+    else
+      {:cont, context}
+    end
+  end
 end
 ```
 
@@ -915,7 +1118,7 @@ end
 
 defmodule TestTokens do
   import NimbleParsec
-  import SwiftClass.Modifier
+  import SwiftClass.Modifiers
   import TestHelpers
   use ExUnit.Case, async: true
 
@@ -1033,7 +1236,7 @@ defmodule TestModifiers do
 
   test "literal errors" do
     # """
-    # blue(a: 1 
+    # blue(a: 1
     # """
     # "blue(a, n: 1)"
     # "blue(to_ime(1))"
@@ -1042,11 +1245,20 @@ defmodule TestModifiers do
     # "color(color: .foo.bar.baz(1a, 2).qux)"
 
     "blue(a, 1a)"
+    # "blue(1a)"
+    #
     # "color(color: .foo.bar.baz)"
     # "color(color: Color.foo)"
+    # bold(to_float(1))
+    # bold(attr("text-value"))
+    # "font(a: [largeTitle: 1a])"
+    # "font(a: [a])"
+    "font(largeTitle: a, a ,1a)"
+    # bold(abc())
+    # italic(true)
 
-    # |> String.trim()
-    |> SwiftClass.Modifier.modifier(context: [file: __ENV__.file, source_line: 23])
+    |> String.trim()
+    |> SwiftClass.Modifiers.modifiers(context: [file: __ENV__.file, source_line: 23])
     |> IO.inspect()
     |> SwiftClass.Parser.error_from_result()
     |> inspect_result

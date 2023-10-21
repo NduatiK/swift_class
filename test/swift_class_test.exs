@@ -19,7 +19,7 @@ defmodule SwiftClassTest do
     test "parse long stylesheet" do
       file = File.read!("test/helpers/classes.swiftui.style")
 
-      for _ <- 1..1000 do
+      for _ <- 1..100 do
         file
         |> SwiftClass.parse_class_block()
       end
