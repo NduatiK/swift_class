@@ -6,7 +6,7 @@ Mix.install([
 ])
 ```
 
-## Section
+## Parser
 
 <!-- livebook:{"reevaluate_automatically":true} -->
 
@@ -144,8 +144,6 @@ defmodule SwiftClass.Parser.Error do
         forced?: Keyword.get(opts, :force_error?, false)
       })
 
-    # |> IO.inspect()
-
     {rest, arg, context}
   end
 
@@ -181,6 +179,8 @@ defmodule SwiftClass.Parser.Error do
       ]
       |> IO.iodata_to_binary()
       |> String.split("\n")
+      |> Enum.at(line - 1)
+      |> List.wrap()
 
     error_lines =
       [
@@ -190,6 +190,8 @@ defmodule SwiftClass.Parser.Error do
       ]
       |> IO.iodata_to_binary()
       |> String.split("\n")
+      |> Enum.at(line - 1)
+      |> List.wrap()
 
     max_line_number = "#{source_line + Enum.count(error_lines) - 1}"
     line_spacer = String.duplicate(" ", String.length(max_line_number))
@@ -380,6 +382,8 @@ defmodule SwiftClass.Parser do
   end
 end
 ```
+
+## Combinators
 
 <!-- livebook:{"reevaluate_automatically":true} -->
 
@@ -705,7 +709,6 @@ defmodule SwiftClass.Expressions do
     )
     |> ignore_whitespace()
     |> concat(close)
-    |> ignore_whitespace()
   end
 
   #
@@ -1104,6 +1107,75 @@ end
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
+defmodule SwiftClass.Blocks do
+  @moduledoc false
+  import NimbleParsec
+  import SwiftClass.Tokens
+  import SwiftClass.Expressions
+  import SwiftClass.Modifiers
+  import SwiftClass.PostProcessors
+  import SwiftClass.Parser
+
+  string_with_variable =
+    double_quoted_string()
+    |> ignore_whitespace()
+    |> ignore(string("<>"))
+    |> ignore_whitespace()
+    |> concat(lookahead_not(string("do")))
+    |> concat(variable())
+    |> post_traverse({:block_open_with_variable_to_ast, []})
+
+  block_open =
+    one_of([
+      {string_with_variable,
+       "a variable class name eg #{IO.ANSI.format([:green, :bright, "\"color\" <> color_name do"])}"},
+      {double_quoted_string(),
+       "a static class name eg #{IO.ANSI.format([:green, :bright, "\"red-header\" do"])}"}
+    ])
+    |> optional(
+      ignore_whitespace()
+      |> ignore(string(","))
+      |> ignore_whitespace()
+      |> concat(key_value_pairs())
+    )
+    |> ignore_whitespace()
+    |> ignore(string("do"))
+    |> post_traverse({:block_open_to_ast, []})
+
+  block_close =
+    ignore_whitespace()
+    |> ignore(string("end"))
+
+  block_contents =
+    repeat(
+      lookahead_not(block_close)
+      |> ignore_whitespace()
+      |> parsec(:modifier)
+    )
+    |> ignore_whitespace()
+    |> wrap()
+
+  defcombinator(
+    :class_block,
+    ignore_whitespace()
+    |> concat(
+      expected(block_open,
+        error_message: "invalid block head"
+      )
+    )
+    |> concat(block_contents)
+    |> concat(block_close)
+    |> post_traverse({:wrap_in_tuple, []}),
+    export_combinator: true
+  )
+end
+```
+
+## Co
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
 ExUnit.start(autorun: false, exclude: [:skip])
 
 defmodule TestHelpers do
@@ -1253,13 +1325,47 @@ defmodule TestModifiers do
     # bold(attr("text-value"))
     # "font(a: [largeTitle: 1a])"
     # "font(a: [a])"
-    "font(largeTitle: a, a ,1a)"
+    # "font(largeTitle: a, a ,1a)"
     # bold(abc())
     # italic(true)
 
     |> String.trim()
     |> SwiftClass.Modifiers.modifiers(context: [file: __ENV__.file, source_line: 23])
     |> IO.inspect()
+    |> SwiftClass.Parser.error_from_result()
+    |> inspect_result
+  end
+end
+
+ExUnit.run()
+```
+
+## Section
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+ExUnit.start(autorun: false, exclude: [:skip])
+
+defmodule TestModifiers2 do
+  use ExUnit.Case, async: true
+  import NimbleParsec
+  import TestHelpers
+  import SwiftClass.Blocks
+
+  defparsec(
+    :parse_class_block,
+    repeat(SwiftClass.Parser.start(), parsec(:class_block))
+  )
+
+  test "literal errors" do
+    """
+    "button-style-" <> b do
+      buttonStyle(style: to_atom(button_style))
+    end
+    """
+    |> String.trim()
+    |> parse_class_block(context: [file: __ENV__.file, source_line: 23])
     |> SwiftClass.Parser.error_from_result()
     |> inspect_result
   end

@@ -141,8 +141,6 @@ defmodule SwiftClass.Modifiers do
 
   defcombinator(
     :modifier_arguments,
-    # ignore_whitespace()
-    # |> one_of(@modifier_arguments.(true))
     empty()
     |> comma_separated_list(
       one_of(empty(), @modifier_arguments,
@@ -160,7 +158,6 @@ defmodule SwiftClass.Modifiers do
 
   defcombinator(
     :modifier_brackets,
-    # enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
     expected(
       choice([
         ignore(
@@ -186,7 +183,6 @@ defmodule SwiftClass.Modifiers do
 
   defcombinator(
     :inner_modifier_brackets,
-    # enclosed("(", comma_separated_list(one_of(@bracket_child)), ")")
     choice([
       ignore(
         string("(")
@@ -208,7 +204,6 @@ defmodule SwiftClass.Modifiers do
     |> concat(modifier_name())
     |> parsec(:inner_modifier_brackets)
     |> post_traverse({PostProcessors, :to_function_call_ast, []})
-    # |> parsec(:modifier_brackets)
   )
 
   defparsec(
@@ -216,48 +211,22 @@ defmodule SwiftClass.Modifiers do
     ignore_whitespace()
     |> concat(modifier_name())
     |> parsec(:modifier_brackets)
-    |> post_traverse({PostProcessors, :to_function_call_ast, []}),    export_combinator: true
-
-    # |> parsec(:modifier_brackets)
+    |> post_traverse({PostProcessors, :to_function_call_ast, []}),
+    export_combinator: true
   )
 
   defparsec(
     :modifiers,
     SwiftClass.Parser.start()
     |> times(parsec(:modifier), min: 1),
-    # parsec(:modifier),
-    # |> repeat_while(
-    #   choice([
-    #     ignore_whitespace()
-    #     |> eos(),
-    #     parsec(:modifier)
-    #   ]),
-    #   {__MODULE__, :no_error, []}
-    # ),
-
     export_combinator: true
   )
 
-  # defparsec(
-  #   :modifiers,
-  #   SwiftClass.Parser.start()
-  #   |> repeat_while(parsec(:modifier)
-  #   |> ignore_whitespace(), {__MODULE__, :no_error, []}),
-  #   # parsec(:modifier), min: 1),
-  #   # |> expected(eos(),
-  #   #   error_message: "expected nothing after the modifier"
-  #   # ),
-  #   export_combinator: true
-  # )
-
   def no_error("", context, _, _) do
-    IO.inspect("no_error _hlat")
     {:halt, context}
   end
 
   def no_error(_, context, _, _) do
-    IO.inspect({"no_error", context})
-
     if SwiftClass.Parser.Context.has_error?(context) do
       {:halt, context}
     else

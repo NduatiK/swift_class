@@ -4,6 +4,7 @@ defmodule SwiftClass.Parser.Context do
   defstruct source: "",
             errors: [],
             file: "",
+            module: nil,
             # Where in the code does the input start?
             # Useful for localizing errors when parsing sigil text
             source_line: 1,

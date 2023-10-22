@@ -110,7 +110,6 @@ defmodule SwiftClass.Tokens do
       error_parser:
         choice([
           non_whitespace(also_ignore: String.to_charlist("[](),"), fail_if_empty: true),
-
           non_whitespace(also_ignore: String.to_charlist("]),"), fail_if_empty: true),
           non_whitespace()
         ]),

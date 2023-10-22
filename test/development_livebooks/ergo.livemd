@@ -1,0 +1,782 @@
+# Untitled notebook
+
+```elixir
+Mix.install([
+  {:ergo, "~> 0.9.9"}
+])
+```
+
+## Section
+
+```elixir
+defmodule Combinators do
+  alias Ergo.Context
+  alias Ergo.Parser
+
+  @doc ~S"""
+  The `transform_with_context/2` parser runs a transforming function on the AST of its child parser.
+
+  ## Examples
+
+      # Sum the digits
+      iex> alias Ergo.Context
+      iex> import Ergo.{Combinators, Terminals}
+      iex> digit_to_int = fn d -> List.to_string([d]) |> String.to_integer() end
+      iex> t_fn = fn old_ctx, _new_ctx, ast -> "#{ast |> Enum.map(digit_to_int) |> Enum.sum()} on line #{old_ctx.line}" end
+      iex> parser = sequence([digit(), digit(), digit(), digit()]) |> Combinators.transform_with_context(t_fn)
+      iex> context = Ergo.parse(parser, "1234")
+      %Context{status: :ok, ast: "10 on line 1", index: 4, line: 1, col: 5} = context
+  """
+  def transform_with_context(%Parser{} = parser, transformer_fn, opts \\ [])
+      when is_function(transformer_fn) do
+    label = Keyword.get(opts, :label, "transform_with_context<#{parser.label}>")
+
+    Parser.combinator(
+      :transform_with_context,
+      label,
+      fn %Context{} = ctx ->
+        with %Context{status: :ok} = match_ctx <- Parser.invoke(ctx, parser) do
+          match_ctx
+          |> Context.ast_transform(fn ast -> transformer_fn.(ctx, match_ctx, ast) end)
+        end
+      end,
+      child_info: Parser.child_info_for_telemetry(parser)
+    )
+  end
+
+  @doc ~S"""
+  Wraps the results of the given parser in a list.
+
+  ## Examples
+
+  iex> import Combinators
+  iex> import Ergo.Terminals
+  iex> alias Ergo.Context
+  iex> parser = wrap(digit())
+  iex> context = Ergo.parse(parser, "1")
+  %Context{status: :ok, ast: [?1], index: 1, line: 1, col: 2} = context
+  """
+  def wrap(%Parser{} = parser) do
+    Ergo.Combinators.transform(parser, &List.wrap/1)
+  end
+end
+
+defmodule Context do
+  def create_annotation(%Ergo.Context{} = old_ctx, %Ergo.Context{} = _new_ctx) do
+    [file: old_ctx.data[:file], line: old_ctx.line, module: old_ctx.data[:module]]
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+defmodule Tokens do
+  import Ergo.Terminals
+  import Ergo.Combinators
+  import Combinators
+
+  @doc """
+
+  iex> Ergo.parse(Tokens.boolean(), "true").ast
+  true
+
+  iex> Ergo.parse(Tokens.boolean(), "false").ast
+  false
+
+  """
+  def boolean() do
+    choice([
+      replace(literal("true"), true),
+      replace(literal("false"), false)
+    ])
+  end
+
+  @doc """
+
+  iex> Ergo.parse(Tokens.nil_(), "nil").ast
+  nil
+
+  """
+  def nil_() do
+    replace(literal("nil"), nil)
+  end
+
+  def minus() do
+    optional(char(?-))
+    |> transform(fn ast ->
+      case ast do
+        nil -> 1
+        45 -> -1
+      end
+    end)
+  end
+
+  defp digits() do
+    many(digit(), min: 1, ast: &List.to_string/1)
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.integer(), "12").ast
+  12
+
+  iex> Ergo.parse(Tokens.integer(), "-12").ast
+  -12
+  """
+  def integer() do
+    sequence(
+      [
+        optional(literal("-")),
+        digits()
+      ],
+      ast: fn parts ->
+        {integer, ""} =
+          parts
+          |> Enum.join()
+          |> Integer.parse()
+
+        integer
+      end
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.float(), "0.34").ast
+  0.34
+
+  iex> Ergo.parse(Tokens.float(), "-0.34").ast
+  -0.34
+
+  iex> Ergo.parse(Tokens.float(), "12.34").ast
+  12.34
+
+  iex> Ergo.parse(Tokens.float(), "-12.34").ast
+  -12.34
+  """
+  def float() do
+    sequence(
+      [
+        optional(literal("-")),
+        digits(),
+        literal("."),
+        digits()
+      ],
+      ast: fn parts ->
+        {float, ""} =
+          parts
+          |> Enum.join("")
+          |> Float.parse()
+
+        float
+      end
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.word(), "abc_").ast
+  "abc_"
+
+  iex> Ergo.parse(Tokens.word(), "ABC_").ast
+  "ABC_"
+
+  iex> Ergo.parse(Tokens.word(), "_ABC").ast
+  "_ABC"
+
+  iex> Ergo.parse(Tokens.word(), "1").ast
+  nil
+  """
+  def word() do
+    sequence(
+      [
+        transform(char([?a..?z, ?A..?Z, ?_]), &List.wrap/1),
+        many(char([?a..?z, ?A..?Z, ?0..?9, ?_]), min: 0)
+      ],
+      ast: fn parts ->
+        parts
+        |> Enum.map(&List.to_string/1)
+        |> Enum.join("")
+      end
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.atom(), ":abc").ast
+  :abc
+
+  iex> Ergo.parse(Tokens.atom(), "abc").ast
+  nil
+
+  iex> Ergo.parse(Tokens.atom(), ":1").ast
+  nil
+
+  iex> Ergo.parse(Tokens.atom(), "1").ast
+  nil
+  """
+  def atom() do
+    sequence(
+      [
+        ignore(literal(":")),
+        word()
+      ],
+      ast: &String.to_atom(hd(&1))
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.double_quoted_string(), ~s|"abc def"|).ast
+  "abc def"
+
+  iex> Ergo.parse(Tokens.double_quoted_string(), ~s|"123"|).ast
+  "123"
+
+  iex> Ergo.parse(Tokens.double_quoted_string(), ~s|"abc"v"|).ast
+  "abc"
+  """
+  def double_quoted_string() do
+    sequence(
+      [
+        ignore(char(?")),
+        many(not_char(?")),
+        ignore(char(?"))
+      ],
+      ast: &List.to_string/1
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.whitespace(), "  ").ast
+  "  "
+
+  iex> Ergo.parse(Tokens.whitespace(), " a ").ast
+  " "
+
+  iex> Ergo.parse(Tokens.whitespace(), "\\n\\t ").ast
+  "\n\t "
+  """
+  def whitespace(opts \\ []) do
+    many(ws(), Keyword.merge([ast: &List.to_string/1], opts))
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.ignore_whitespace(), "  ").ast
+  nil
+  """
+  def ignore_whitespace() do
+    ignore(optional(whitespace(min: 1)))
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.variable(), "number").ast
+  {:number, [file: nil, line: 1, module: nil], Elixir}
+
+  iex> [Tokens.ignore_whitespace(), Tokens.variable()]
+  ...> |> Ergo.Combinators.sequence()
+  ...> |> Ergo.parse("\\n number")
+  ...> |> then(&get_in(&1, [Access.key(:ast)]))
+  [{:number, [file: nil, line: 2, module: nil], Elixir}]
+
+  iex> Ergo.parse(Tokens.variable(), "1abc").ast
+  nil
+  """
+  def variable() do
+    transform_with_context(word(), fn old_ctx, new_ctx, variable_name ->
+      {String.to_atom(variable_name), Context.create_annotation(old_ctx, new_ctx), Elixir}
+    end)
+  end
+
+  def literals() do
+    choice([
+      float(),
+      integer(),
+      boolean(),
+      nil_(),
+      atom(),
+      double_quoted_string()
+    ])
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.modifier_name(), "number").ast
+  "number"
+  """
+  def modifier_name() do
+    word()
+  end
+
+  @doc """
+  iex> Ergo.parse(Tokens.module_name(), "Number").ast
+  "Number"
+
+  iex> Ergo.parse(Tokens.module_name(), "number").ast
+  nil
+  """
+  def module_name() do
+    sequence(
+      [
+        transform(char([?A..?Z]), &List.wrap/1),
+        many(char([?a..?z, ?A..?Z, ?0..?9, ?_]), min: 0)
+      ],
+      ast: fn parts ->
+        parts
+        |> Enum.map(&List.to_string/1)
+        |> Enum.join("")
+      end,
+      label: "Module name"
+    )
+  end
+end
+```
+
+```elixir
+defmodule Expressions do
+  import Tokens
+  import Ergo.Terminals
+  import Ergo.Combinators
+
+  @doc """
+  iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "(Color)").ast
+  "Color"
+
+  iex> Ergo.parse(Expressions.enclosed("(", Tokens.integer(),")"), "(12)").ast
+  12
+
+  iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "()").ast
+  nil
+
+  iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "Color")
+  iex> {:error, [{error_id, _, error_message}|_]} = ctx.status
+  iex> {ctx.ast, {error_id, error_message}}
+  {nil, {:unexpected_token, "Expected #{Tokens.module_name().label}"}}
+  """
+  def enclosed(open, parser, close) do
+    sequence(
+      [
+        ignore(literal(open)),
+        parser,
+        ignore(literal(close))
+      ],
+      err: fn ctx ->
+        Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
+      end
+    )
+    |> hoist()
+  end
+
+  #
+  # Collections
+  #
+
+  @doc """
+  iex> Ergo.parse(Expressions.comma_separated_list(Tokens.integer()), "1,2,   3").ast
+  [1, 2, 3]
+
+  iex> Ergo.parse(Expressions.comma_separated_list(Tokens.integer()), "1,2,   ").ast
+  [1, 2]
+  """
+  def comma_separated_list(parser, opts \\ []) do
+    sequence(
+      [
+        parser,
+        many(
+          hoist(
+            sequence([
+              ignore_whitespace(),
+              ignore(literal(",")),
+              ignore_whitespace(),
+              parser
+            ])
+          )
+        )
+      ],
+      Keyword.merge(
+        opts,
+        ast: fn [first, rest] -> [first | rest] end
+      )
+    )
+  end
+
+  # def key_value_children(generate_error?) do
+  #   [
+  #     {literal(error_parser: empty(), generate_error?: generate_error?),
+  #      ~s'a number, string, nil, boolean or :atom'},
+  #     {parsec(:key_value_list),
+  #      ~s'a list of keyword pairs eg ‘[style: :dashed]’, ‘[size: 12]’ or ‘[lineWidth: lineWidth]’'},
+  #     {parsec(:ime), ~s'an IME eg ‘Color.red’ or ‘.largeTitle’ or ‘Color.to_ime(variable)’'},
+  #     {parsec(:nested_attribute), ~s'a modifier eg ‘foo(bar())’'},
+  #     {variable(generate_error?: generate_error?),
+  #      ~s|a variable defined in the class header eg ‘color_name’|}
+  #   ]
+  # end
+
+  @doc """
+  iex> Ergo.parse(Expressions.key_value_pair(), "a: 1").ast
+  {:a, 1}
+
+  iex> Ergo.parse(Expressions.key_value_pair(), ~s|a: "b"|).ast
+  {:a, "b"}
+  """
+  def key_value_pair() do
+    sequence(
+      [
+        atom(word()),
+        ignore(literal(":")),
+        ignore(whitespace(min: 1)),
+        choice([
+          literals()
+        ])
+      ],
+      ast: &List.to_tuple/1
+    )
+  end
+
+  @doc """
+  iex> Ergo.parse(Expressions.key_value_pairs(), "a: 1, b: 2").ast
+  [a: 1, b: 2]
+
+  iex> Ergo.parse(Expressions.key_value_pairs(), ~s'a: "b", c: "d"').ast
+  [a: "b", c: "d"]
+  """
+  def key_value_pairs(opts \\ []) do
+    comma_separated_list(key_value_pair(), opts)
+  end
+
+  @doc """
+  iex> Ergo.parse(Expressions.key_value_list(), "[a: 1, b: 2]").ast
+  [a: 1, b: 2]
+
+  iex> Ergo.parse(Expressions.key_value_list(), ~s'[a: "b", c: "d"]').ast
+  [a: "b", c: "d"]
+  """
+  def key_value_list(opts \\ []) do
+    enclosed("[", key_value_pairs(opts), "]")
+  end
+
+  @doc """
+  iex> Ergo.parse(Expressions.attr(), ~s'attr("placeholder")').ast
+  {:__attr__, [], "placeholder"}
+
+  iex> Ergo.parse(Expressions.attr(), ~s'attr(placeholder)').ast
+  nil
+  """
+  def attr() do
+    sequence(
+      [
+        ignore(literal("attr")),
+        enclosed("(", double_quoted_string(), ")")
+      ],
+      ast: fn [attr] -> {:__attr__, [], attr} end
+    )
+  end
+end
+```
+
+```elixir
+defmodule Blocks do
+  import Tokens
+  import Expressions
+  import Ergo.Terminals
+  import Ergo.Combinators
+  import Combinators
+
+  @doc """
+  iex> Ergo.parse(Tokens.integer(), "12").ast
+  12
+
+  iex> Ergo.parse(Blocks.block_contents(Tokens.integer()), "do 12 end").ast
+  12
+
+  # Works with lists
+  iex> import Ergo.Combinators
+  iex> import Tokens
+  iex> integers = many(hoist(sequence([Tokens.integer(), ignore_whitespace()])))
+  iex> Ergo.parse(Blocks.block_contents(integers), "do 12 13 end").ast
+  [12, 13]
+  """
+  def block_contents(parser) do
+    sequence(
+      [
+        ignore(literal("do")),
+        ignore_whitespace(),
+        parser,
+        ignore_whitespace(),
+        ignore(literal("end"))
+      ]
+      # err: fn ctx ->
+      #   Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
+      # end
+    )
+    |> hoist
+  end
+
+  @doc """
+  iex> Ergo.parse(Blocks.block_head(), ~s'"class_name"').ast
+  ["class_name", {:_target, [file: nil, line: 1, module: nil], Elixir}]
+
+  iex> Ergo.parse(Blocks.block_head(), ~s'"class_name", target: :watch').ast
+  ["class_name", {:_target, [file: nil, line: 1, module: nil, target: :watch], Elixir}]
+
+  iex> Ergo.parse(Blocks.block_head(), ~s'"class_name" <> variable').ast
+  [
+    {:<>,
+      [file: nil, line: 1, module: nil, context: Elixir, imports: [{2, Kernel}]],
+      ["class_name", {:variable, [file: nil, line: 1, module: nil], Elixir}]
+    },
+    {:_target, [file: nil, line: 1, module: nil], Elixir}
+  ]
+  """
+  def block_head() do
+    class_opts =
+      sequence([
+        ignore(literal(",")),
+        ignore_whitespace(),
+        key_value_pairs()
+      ])
+      |> hoist()
+
+    static_block_head = double_quoted_string()
+
+    dynamic_block_head =
+      sequence([
+        double_quoted_string(),
+        ignore_whitespace(),
+        ignore(literal("<>")),
+        ignore_whitespace(),
+        variable()
+      ])
+      |> transform_with_context(fn old_ctx, new_ctx, [static_part, variable_part] ->
+        annotation =
+          Context.create_annotation(old_ctx, new_ctx) ++
+            [context: Elixir, imports: [{2, Kernel}]]
+
+        {:<>, annotation, [static_part, variable_part]}
+      end)
+
+    sequence([
+      choice([dynamic_block_head, static_block_head]),
+      ignore_whitespace(),
+      optional(class_opts),
+      ignore_whitespace()
+    ])
+    |> Combinators.transform_with_context(fn old_ctx, new_ctx, ast ->
+      {class_name, annotation} =
+        case ast do
+          [class_name] ->
+            {class_name, Context.create_annotation(old_ctx, new_ctx)}
+
+          [class_name, block_opts] ->
+            {class_name, Context.create_annotation(old_ctx, new_ctx) ++ block_opts}
+        end
+
+      [class_name, {:_target, annotation, Elixir}]
+    end)
+  end
+end
+```
+
+```elixir
+defmodule SwiftUI do
+  import Tokens
+  import Expressions
+  import Ergo.Terminals
+  import Ergo.Combinators
+  import Combinators
+
+  @doc """
+  iex> Ergo.parse(SwiftUI.ime(), ".red").ast
+  {:., [], [nil, :red]}
+
+  iex> Ergo.parse(SwiftUI.ime(), "Color.red").ast
+  {:., [], [:Color, :red]}
+
+  # to_ime
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "to_ime(var)").ast
+  {:., [], [nil, {Elixir, [], {:to_ime, annotations, [{:var, annotations, Elixir}]}}]}
+
+  # to_ime with chaining
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "to_ime(color).foo").ast
+  {:., [], [nil, {:., [], [{Elixir, [], {:to_ime, annotations, [{:color, annotations, Elixir}]}}, :foo]}]}
+
+  # to_ime in the middle of a chain
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.to_ime(color).bar").ast
+  {:., [], [:Foo, {:., [], [{Elixir, [], {:to_ime, annotations, [{:color, annotations, Elixir}]}}, :bar]}]}
+
+  # ime with empty args
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), ".foo.bar.baz().qux").ast
+  {:., [], [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [:baz, :qux]}]}]}]}
+
+  # ime with args
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), ".foo.bar.baz(1, 2).qux").ast
+  {:., [], [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, :qux]}]}]}]}
+  """
+  def ime() do
+    sequence(
+      [
+        choice([
+          scoped_ime(),
+          wrap(ime_helper_function(true)),
+          wrap(dotted_ime(true))
+        ]),
+        many(
+          choice([
+            # <...>.to_ime(color)
+            ime_helper_function(false),
+            # <...>.red
+            dotted_ime(false)
+          ])
+        )
+      ],
+      ast: fn [first, rest] -> first ++ rest end
+    )
+    |> transform(&chain_ime/1)
+  end
+
+  defp dotted_ime(is_initial) do
+    sequence(
+      [
+        ignore(literal(".")),
+        word(),
+        ime_args()
+      ],
+      ast: fn ast ->
+        ime_ast =
+          case ast do
+            [variable_name, args] ->
+              {String.to_atom(variable_name), [], args}
+
+            [variable_name] ->
+              String.to_atom(variable_name)
+          end
+
+        wrap_initial_ime(ime_ast, is_initial)
+      end
+    )
+  end
+
+  defp scoped_ime() do
+    sequence(
+      [
+        module_name(),
+        choice([
+          ime_helper_function(false),
+          dotted_ime(false)
+        ])
+      ],
+      ast: fn
+        [module_name, ime_helper_function_ast] ->
+          wrap_ime_in_scope(module_name, ime_helper_function_ast)
+      end
+    )
+  end
+
+  defp ime_helper_function(is_initial) do
+    function_name =
+      if is_initial do
+        ignore(literal("to_ime"))
+      else
+        ignore(literal(".to_ime"))
+      end
+
+    sequence([
+      function_name,
+      enclosed(
+        "(",
+        variable(),
+        ")"
+      )
+    ])
+    |> transform_with_context(fn old_ctx, new_ctx, [variable] ->
+      annotations = Context.create_annotation(old_ctx, new_ctx)
+
+      wrap_initial_ime({Elixir, [], {:to_ime, annotations, [variable]}}, is_initial)
+    end)
+  end
+
+  defp wrap_initial_ime(ast, true), do: {:., [], [nil, ast]}
+  defp wrap_initial_ime(ast, _), do: ast
+
+  defp wrap_ime_in_scope(module_name, ime_ast) do
+    [String.to_atom(module_name), ime_ast]
+    # {:., [], [String.to_atom(module_name), ime_ast]}
+  end
+
+  def ime_args_choices do
+    [
+      literals()
+    ]
+  end
+
+  defp ime_args() do
+    a = [
+      literals()
+    ]
+
+    # choice([
+    #   ignore(string("()")),
+    #   lookahead(utf8_char(String.to_charlist(".)")))
+    #   |> concat(empty()),
+    #   parsec(:modifier_brackets)
+    # ])
+
+    choice([
+      ignore(literal("()")),
+      # enclosed("(", comma_separated_list(choice(@ime_args)), ")")
+      hoist(
+        sequence([
+          not_lookahead(literal("(")),
+          ignore_whitespace()
+        ])
+      ),
+      enclosed("(", comma_separated_list(choice(ime_args_choices()), []), ")")
+      # lookahead(utf8_char(String.to_charlist(".)")))
+      # |> concat(empty()),
+      # parsec(:modifier_brackets)
+    ])
+  end
+
+  defp combine_ime_pair({:., [], [nil, part]}, inner) do
+    {:., [], [nil, {:., [], [part, inner]}]}
+  end
+
+  defp combine_ime_pair(outer, inner) do
+    {:., [], [outer, inner]}
+  end
+
+  defp chain_ime(sections) do
+    sections
+    |> Enum.reverse()
+    |> IO.inspect()
+    |> Enum.reduce(&combine_ime_pair/2)
+  end
+end
+```
+
+<!-- livebook:{"reevaluate_automatically":true} -->
+
+```elixir
+alias Ergo
+alias Ergo.Context
+import Ergo.Terminals
+Ergo.parse(Expressions.enclosed("(", Tokens.module_name(), ")"), "(1)")
+
+# 
+```
+
+```elixir
+defmodule Jetpack do
+  # 24.dp
+  # https://developer.android.com/jetpack/compose/modifiers-list
+  # Modifier
+  #     .matchParentSize()
+  #     .background(Color.LightGray)
+  # modifier = Modifier.weight(2f)
+end
+```
+
+```elixir
+
+```

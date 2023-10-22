@@ -26,7 +26,6 @@ defmodule SwiftClass.Expressions do
     )
     |> ignore_whitespace()
     |> concat(close)
-    |> ignore_whitespace()
   end
 
   #

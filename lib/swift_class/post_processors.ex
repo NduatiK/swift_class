@@ -1,5 +1,6 @@
 defmodule SwiftClass.PostProcessors do
   # PostProcessors
+  import SwiftClass.Parser.Annotations
 
   def to_attr_ast(rest, [attr, "attr"], context, {_line, _offset}, _binary_offset)
       when is_binary(attr) do
@@ -14,24 +15,39 @@ defmodule SwiftClass.PostProcessors do
         rest,
         [variable, string],
         context,
-        {_line, _offset},
+        {line, _offset},
         _binary_offset
       ) do
     {rest,
      [
-       {:<>, [context: Elixir, imports: [{2, Kernel}]], [string, variable]}
+       {:<>,
+        context_to_annotation(context.context, line) ++ [context: Elixir, imports: [{2, Kernel}]],
+        [string, variable]}
      ], context}
   end
 
-  def tag_as_elixir_code(rest, [quotable], context, {_line, _offset}, _binary_offset) do
-    {rest, [{Elixir, [], quotable}], context}
+  def tag_as_elixir_code(rest, [quotable], context, {line, _offset}, _binary_offset) do
+    {rest,
+     [
+       {Elixir, context_to_annotation(context.context, context[:open_elixir_code] || line),
+        quotable}
+     ], context}
   end
 
-  def to_elixir_variable_ast(rest, [variable_name], context, _line, _offset) do
-    {rest, [{String.to_atom(variable_name), [], Elixir}], context}
+  def to_elixir_variable_ast(rest, [variable_name], context, {line, _offset}, _byte_offset) do
+    {rest,
+     [{String.to_atom(variable_name), context_to_annotation(context.context, line), Elixir}],
+     context}
   end
 
-  def to_implicit_ime_ast(rest, [[], variable_name], context, _line, _offset, _is_initial = true) do
+  def to_implicit_ime_ast(
+        rest,
+        [[], variable_name],
+        context,
+        {_line, _offset},
+        _byte_offset,
+        _is_initial = true
+      ) do
     {rest, [{:., [], [nil, String.to_atom(variable_name)]}], context}
   end
 
@@ -46,19 +62,45 @@ defmodule SwiftClass.PostProcessors do
     {rest, [{:., [], [nil, {String.to_atom(variable_name), [], args}]}], context}
   end
 
-  def to_implicit_ime_ast(rest, [[], variable_name], context, _line, _offset, false) do
+  def to_implicit_ime_ast(
+        rest,
+        [[], variable_name],
+        context,
+        {_line, _offset},
+        _byte_offset,
+        false
+      ) do
     {rest, [String.to_atom(variable_name)], context}
   end
 
-  def to_implicit_ime_ast(rest, [args, variable_name], context, _line, _offset, false) do
+  def to_implicit_ime_ast(
+        rest,
+        [args, variable_name],
+        context,
+        {_line, _offset},
+        _byte_offset,
+        false
+      ) do
     {rest, [{String.to_atom(variable_name), [], args}], context}
   end
 
-  def to_scoped_ime_ast(rest, [[] = _args, variable_name, scope], context, _line, _offset) do
+  def to_scoped_ime_ast(
+        rest,
+        [[] = _args, variable_name, scope],
+        context,
+        {_line, _offset},
+        _byte_offset
+      ) do
     {rest, [String.to_atom(variable_name), String.to_atom(scope)], context}
   end
 
-  def to_scoped_ime_ast(rest, [args, variable_name, scope], context, _line, _offset) do
+  def to_scoped_ime_ast(
+        rest,
+        [args, variable_name, scope],
+        context,
+        {_line, _offset},
+        _byte_offset
+      ) do
     {rest, [{String.to_atom(variable_name), [], args}, String.to_atom(scope)], context}
   end
 
@@ -70,15 +112,20 @@ defmodule SwiftClass.PostProcessors do
     {:., [], [outer, inner]}
   end
 
-  def chain_ast(rest, sections, context, _line, _offset) do
+  def chain_ast(rest, sections, context, {_line, _offset}, _byte_offset) do
     sections = Enum.reduce(sections, &combine_chain_ast_parts/2)
 
     {rest, [sections], context}
   end
 
-  def to_function_call_ast(rest, [_ | _] = args, context, _line, _offset) do
+  def to_function_call_ast(rest, [_ | _] = args, context, {line, _offset}, _byte_offset) do
     [ast_name | other_args] = Enum.reverse(args)
-    {rest, [{String.to_atom(ast_name), [], other_args}], context}
+
+    {rest,
+     [
+       {String.to_atom(ast_name),
+        context_to_annotation(context.context, context[:open_function_line] || line), other_args}
+     ], context}
   end
 
   def to_function_call_ast(_, [], _, _line, _offset) do
@@ -134,17 +181,18 @@ defmodule SwiftClass.PostProcessors do
     {rest, [content: Enum.reverse(content)], context}
   end
 
-  def block_open_to_ast(rest, [class_name], context, {_line, _offset}, _binary_offset) do
-    {rest, [[class_name, {:_target, [], Elixir}]], context}
+  def block_open_to_ast(rest, [class_name], context, {line, _offset}, _binary_offset) do
+    {rest, [[class_name, {:_target, context_to_annotation(context.context, line), Elixir}]],
+     context}
   end
 
   def block_open_to_ast(
         rest,
-        [key_value_pairs, class_name],
+        [block_opts, class_name],
         context,
-        {_line, _offset},
+        {line, _offset},
         _binary_offset
       ) do
-    {rest, [[class_name, key_value_pairs]], context}
+    {rest, [[class_name, context_to_annotation(context.context, line) ++ block_opts]], context}
   end
 end

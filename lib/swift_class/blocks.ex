@@ -42,7 +42,7 @@ defmodule SwiftClass.Blocks do
     |> ignore_whitespace()
     |> wrap()
 
-  defparsec(
+  defcombinator(
     :class_block,
     ignore_whitespace()
     |> concat(block_open)

@@ -66,8 +66,6 @@ defmodule SwiftClass.Parser.Error do
         forced?: Keyword.get(opts, :force_error?, false)
       })
 
-    # |> IO.inspect()
-
     {rest, arg, context}
   end
 
@@ -103,6 +101,8 @@ defmodule SwiftClass.Parser.Error do
       ]
       |> IO.iodata_to_binary()
       |> String.split("\n")
+      |> Enum.at(line - 1)
+      |> List.wrap()
 
     error_lines =
       [
@@ -112,6 +112,8 @@ defmodule SwiftClass.Parser.Error do
       ]
       |> IO.iodata_to_binary()
       |> String.split("\n")
+      |> Enum.at(line - 1)
+      |> List.wrap()
 
     max_line_number = "#{source_line + Enum.count(error_lines) - 1}"
     line_spacer = String.duplicate(" ", String.length(max_line_number))
