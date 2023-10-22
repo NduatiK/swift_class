@@ -1553,3 +1553,36 @@ end
 
 ExUnit.run()
 ```
+
+```elixir
+inspect = fn input, line ->
+  result =
+    Modifiers.modifiers()
+    |> transform(fn
+      [one] -> one
+      not_one -> not_one
+    end)
+    |> Ergo.parse(input)
+
+  case result do
+    %Ergo.Context{status: :ok, ast: ast} ->
+      IO.puts(inspect(result))
+
+    %Ergo.Context{status: {:error, errors}} ->
+      IO.puts(inspect(errors))
+  end
+end
+
+inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
+
+# inspect.("blue", __ENV__.line)
+# inspect.("1(.red)", __ENV__.line)
+# inspect.("font(Color.largeTitle.)", __ENV__.line)
+# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
+# inspect.("font(.largeTitle) {", __ENV__.line)
+
+# inspect.("font(.)))red)", __ENV__.line)
+# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
+# # Should point to 2a
+# inspect.("abc(def: 11, b: [lineWidth: a, l: 2a])", __ENV__.line)
+```
