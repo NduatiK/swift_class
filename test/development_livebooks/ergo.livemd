@@ -87,11 +87,11 @@ defmodule Combinators do
     )
   end
 
-  def halt_if(%Parser{} = parser, error, opts \\ []) do
+  def halt(%Parser{} = parser, error, opts \\ []) do
     label = Keyword.get(opts, :label, "halt<#{parser.label}>")
 
     Parser.combinator(
-      :halt_if,
+      :halt,
       label,
       fn %Context{} = ctx ->
         with %Context{status: :ok} = _new_ctx <- Parser.invoke(ctx, parser) do
@@ -379,6 +379,7 @@ defmodule Expressions do
   import Tokens
   import Ergo.Terminals
   import Ergo.Combinators
+  alias Ergo.Context
 
   @doc """
   iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "(Color)").ast
@@ -403,8 +404,8 @@ defmodule Expressions do
         ignore(literal(close))
       ],
       err: fn ctx ->
-        with %Ergo.Context{status: {:error, _}} <- ctx do
-          Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
+        with %Context{status: {:error, _}} <- ctx do
+          Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
         end
       end
     )
@@ -619,6 +620,47 @@ defmodule Blocks do
         end
 
       [class_name, {:_target, annotation, Elixir}]
+    end)
+  end
+end
+```
+
+```elixir
+defmodule HelperFunctions do
+  import Tokens
+  import Expressions
+  import Ergo.Terminals
+  import Ergo.Combinators
+  import Combinators
+
+  @helper_functions [
+    "to_atom",
+    "to_integer",
+    "to_float",
+    "to_boolean",
+    "camelize",
+    "underscore"
+  ]
+
+  @doc """
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(HelperFunctions.helper_function(), "to_float(number)").ast
+  {Elixir, annotations, {:to_float, annotations, [{:number, annotations, Elixir}]}}
+  """
+  def helper_function() do
+    function_name =
+      @helper_functions
+      |> Enum.map(&literal(&1))
+      |> choice()
+      |> atom()
+
+    sequence([
+      function_name,
+      enclosed("(", variable(), ")")
+    ])
+    |> transform_with_context(fn old_ctx, new_ctx, [function_name | args] ->
+      annotation = Context.create_annotation(old_ctx, new_ctx)
+      {Elixir, annotation, {function_name, annotation, args}}
     end)
   end
 end
@@ -888,6 +930,7 @@ defmodule Modifiers do
   import Ergo.Combinators
   import Ergo.Terminals
   import SwiftUI
+  import HelperFunctions
 
   def modifier() do
     sequence(
@@ -902,6 +945,7 @@ defmodule Modifiers do
                 choices: [
                   literals(),
                   # key_value_list
+                  helper_function(),
                   lazy(ime()),
                   nested_attribute(),
                   variable()
@@ -942,8 +986,8 @@ defmodule Modifiers do
         literal("attr()"),
         literal("attr(")
       ])
-      |> Combinators.halt_if("attr expects a string argument eg attr(\"placeholder\")"),
-      # helper_function(),
+      |> Combinators.halt("attr expects a string argument eg attr(\"placeholder\")"),
+      helper_function(),
       lazy(modifier()),
       variable()
     ])
@@ -958,7 +1002,7 @@ end
 # alias Ergo.Context
 # import Ergo.Terminals
 
-Ergo.parse(Modifiers.modifier(), ~s'font(attr("a"))')
+Ergo.parse(Modifiers.modifier(), ~s'font(a: to_float(size))')
 |> Map.from_struct()
 |> Map.take([:status, :ast])
 ```
