@@ -59,6 +59,50 @@ defmodule Combinators do
   def wrap(%Parser{} = parser) do
     Ergo.Combinators.transform(parser, &List.wrap/1)
   end
+
+  @doc ~S"""
+  # The `lookahead` parser accepts a parser and matches it but does not update the context when it succeeds.
+
+  # ## Example
+
+  #     iex> alias Ergo.Context
+  #     iex> import Ergo.{Combinators, Terminals}
+  #     iex> parser = lookahead(literal("Hello"))
+  #     iex> assert %Context{status: :ok, ast: nil, input: "Hello World", index: 0} = Ergo.parse(parser, "Hello World")
+
+  #     iex> alias Ergo.Context
+  #     iex> import Ergo.{Combinators, Terminals}
+  #     iex> parser = lookahead(literal("Helga"))
+  #     iex> assert %Context{status: {:fatal, [{:lookahead_fail, {1, 4}, _}, {:bad_literal, {1, 4}, _}, {:unexpected_char, {1, 4}, _}]}, index: 3, col: 4, input: "lo World"} = Ergo.parse(parser, "Hello World")
+  """
+  def halt(error) do
+    Parser.combinator(
+      :halt,
+      "halt",
+      fn %Context{} = ctx ->
+        err_ctx = Context.add_error(ctx, :lookahead_fail, error)
+        fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
+        fatal_ctx
+      end
+    )
+  end
+
+  def halt_if(%Parser{} = parser, error, opts \\ []) do
+    label = Keyword.get(opts, :label, "halt<#{parser.label}>")
+
+    Parser.combinator(
+      :halt_if,
+      label,
+      fn %Context{} = ctx ->
+        with %Context{status: :ok} = _new_ctx <- Parser.invoke(ctx, parser) do
+          err_ctx = Context.add_error(ctx, :lookahead_fail, error)
+          fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
+          fatal_ctx
+        end
+      end,
+      child_info: Parser.child_info_for_telemetry(parser)
+    )
+  end
 end
 
 defmodule Context do
@@ -285,14 +329,17 @@ defmodule Tokens do
   end
 
   def literals() do
-    choice([
-      float(),
-      integer(),
-      boolean(),
-      nil_(),
-      atom(),
-      double_quoted_string()
-    ])
+    choice(
+      [
+        float(),
+        integer(),
+        boolean(),
+        nil_(),
+        atom(),
+        double_quoted_string()
+      ],
+      label: "literals"
+    )
   end
 
   @doc """
@@ -356,7 +403,9 @@ defmodule Expressions do
         ignore(literal(close))
       ],
       err: fn ctx ->
-        Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
+        with %Ergo.Context{status: {:error, _}} <- ctx do
+          Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
+        end
       end
     )
     |> hoist()
@@ -415,15 +464,17 @@ defmodule Expressions do
   iex> Ergo.parse(Expressions.key_value_pair(), ~s|a: "b"|).ast
   {:a, "b"}
   """
-  def key_value_pair() do
+  def key_value_pair(opts \\ []) do
     sequence(
       [
         atom(word()),
         ignore(literal(":")),
         ignore(whitespace(min: 1)),
-        choice([
-          literals()
-        ])
+        choice(
+          Keyword.get(opts, :choices, [
+            literals()
+          ])
+        )
       ],
       ast: &List.to_tuple/1
     )
@@ -437,7 +488,7 @@ defmodule Expressions do
   [a: "b", c: "d"]
   """
   def key_value_pairs(opts \\ []) do
-    comma_separated_list(key_value_pair(), opts)
+    comma_separated_list(key_value_pair(opts), opts)
   end
 
   @doc """
@@ -581,6 +632,23 @@ defmodule SwiftUI do
   import Ergo.Combinators
   import Combinators
 
+  def ime_args_choices do
+    [
+      wrap(literals()),
+      key_value_pairs(
+        choices: [
+          literals(),
+          # key_value_list
+          lazy(ime()),
+          # nested_attribute
+          variable()
+        ]
+      ),
+      # nested_attribute
+      wrap(variable())
+    ]
+  end
+
   @doc """
   iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
   iex> Ergo.parse(SwiftUI.ime(), ".red").ast
@@ -608,12 +676,37 @@ defmodule SwiftUI do
   # ime with empty args
   iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
   iex> Ergo.parse(SwiftUI.ime(), ".foo.bar.baz().qux").ast
-  {:., annotations, [nil, {:., annotations, [:foo, {:., [], [:bar, {:., [], [:baz, :qux]}]}]}]}
+  {:., annotations, [nil, {:., annotations, [:foo, {:., annotations, [:bar, {:., annotations, [:baz, :qux]}]}]}]}
 
-  # # ime with args
-  # iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
-  # iex> Ergo.parse(SwiftUI.ime(), ".foo.bar.baz(1, 2).qux").ast
-  # {:., [], [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, :qux]}]}]}]}
+  # ime with args
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), ".foo.bar.baz(1, 2).qux(3, 4)").ast
+  {:., annotations, [nil, {:., annotations, [:foo, {:., annotations, [:bar, {:., annotations, [{:baz, annotations, [1, 2]}, {:qux,  annotations, [3, 4]}]}]}]}]}
+
+  # ime with args
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(1, 2).qux").ast
+  {:., annotations, [:Foo, {:., annotations, [{:baz, annotations, [1, 2]}, :qux]}]}
+
+  # ime with args
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(var)").ast
+  {:., annotations, [:Foo, {:baz, annotations, [{:var, annotations, Elixir}]}]}
+
+  # Handle key_value_pairs
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(color: .red)").ast
+  {:., annotations, [:Foo, {:baz, annotations, [color: {:., annotations, [nil, :red]}]}]}
+
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(color: .red(1))").ast
+  {:., annotations, [:Foo, {:baz, annotations, [color: {:., annotations, [nil, {:red, annotations, [1]}]}]
+  }]}
+
+  # Handle variables
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(color: var)").ast
+  {:., annotations, [:Foo, {:baz, annotations, [color: {:var, annotations, Elixir}]}]}
   """
   def ime() do
     sequence(
@@ -632,17 +725,21 @@ defmodule SwiftUI do
           ])
         )
       ],
-      ast: fn [first, rest] -> [first | rest] end
+      ast: fn [first, rest] -> first ++ rest end,
+      label: "ime"
     )
     |> transform(&chain_ime/1)
   end
 
   defp dotted_ime(is_initial) do
-    sequence([
-      ignore(literal(".")),
-      word(),
-      ime_args()
-    ])
+    sequence(
+      [
+        ignore(literal(".")),
+        word(),
+        ime_args()
+      ],
+      label: "dotted_ime"
+    )
     |> transform_with_context(fn old_ctx, new_ctx, ast ->
       annotation = Context.create_annotation(old_ctx, new_ctx)
 
@@ -652,7 +749,7 @@ defmodule SwiftUI do
             {String.to_atom(variable_name), annotation, args}
 
           [variable_name] ->
-            String.to_atom(variable_name)
+            {:., annotation, [nil, String.to_atom(variable_name)]}
         end
 
       wrap_initial_ime(ime_ast, is_initial, annotation)
@@ -660,13 +757,16 @@ defmodule SwiftUI do
   end
 
   defp scoped_ime() do
-    sequence([
-      module_name(),
-      choice([
-        ime_helper_function(false),
-        dotted_ime(false)
-      ])
-    ])
+    sequence(
+      [
+        module_name(),
+        choice([
+          ime_helper_function(false),
+          dotted_ime(false)
+        ])
+      ],
+      label: "scoped_ime"
+    )
     |> transform_with_context(fn old_ctx, new_ctx, [module_name, ime_helper_function_ast] ->
       annotation = Context.create_annotation(old_ctx, new_ctx)
       wrap_ime_in_scope(module_name, ime_helper_function_ast, annotation)
@@ -681,14 +781,17 @@ defmodule SwiftUI do
         ignore(literal(".to_ime"))
       end
 
-    sequence([
-      function_name,
-      enclosed(
-        "(",
-        variable(),
-        ")"
-      )
-    ])
+    sequence(
+      [
+        function_name,
+        enclosed(
+          "(",
+          variable(),
+          ")"
+        )
+      ],
+      label: "ime_helper_function"
+    )
     |> transform_with_context(fn old_ctx, new_ctx, [variable] ->
       annotations = Context.create_annotation(old_ctx, new_ctx)
 
@@ -700,30 +803,19 @@ defmodule SwiftUI do
     end)
   end
 
-  defp wrap_initial_ime(ast, true, annotations), do: {:., annotations, [nil, ast]}
+  defp wrap_initial_ime({:., _, [nil, ast]}, true, annotations),
+    do: [{:., annotations, [nil, ast]}]
+
+  defp wrap_initial_ime(ast, true, annotations), do: [{:., annotations, [nil, ast]}]
   defp wrap_initial_ime(ast, _, _), do: ast
 
   defp wrap_ime_in_scope(module_name, ime_ast, annotations) do
-    {:., annotations, [{:scope, String.to_atom(module_name)}, ime_ast]}
-  end
-
-  def ime_args_choices do
-    [
-      literals()
-    ]
+    [{:scope, annotations, String.to_atom(module_name)}, ime_ast]
   end
 
   defp ime_args() do
-    # choice([
-    #   ignore(string("()")),
-    #   lookahead(utf8_char(String.to_charlist(".)")))
-    #   |> concat(empty()),
-    #   parsec(:modifier_brackets)
-    # ])
-
     choice([
       ignore(literal("()")),
-      # enclosed("(", comma_separated_list(choice(@ime_args)), ")")
       hoist(
         sequence([
           not_lookahead(literal("(")),
@@ -731,41 +823,130 @@ defmodule SwiftUI do
         ])
       ),
       enclosed("(", comma_separated_list(choice(ime_args_choices()), []), ")")
-      # lookahead(utf8_char(String.to_charlist(".)")))
-      # |> concat(empty()),
-      # parsec(:modifier_brackets)
+      |> transform(&Enum.concat/1)
     ])
   end
 
+  # Foo.baz
+  defp combine_ime_pair({:scope, annotations, scope}, {:., _, [nil, inner]}) do
+    {:., annotations, [scope, inner]}
+  end
+
+  # Foo.baz(1, 2)
+  defp combine_ime_pair({:scope, annotations, scope}, inner) do
+    {:., annotations, [scope, inner]}
+  end
+
+  # .foo.baz
+  defp combine_ime_pair({:., annotations, [nil, outer]}, {:., _, [nil, inner]}) do
+    {:., annotations, [nil, {:., annotations, [outer, inner]}]}
+  end
+
+  # .foo(1, 2).baz
+  defp combine_ime_pair(
+         {name, annotations, args},
+         {:., _, [nil, inner]}
+       )
+       when is_atom(name) do
+    {:., annotations, [{name, annotations, args}, inner]}
+  end
+
+  defp combine_ime_pair(
+         {name, annotations, args},
+         {:., _, [nil, inner]}
+       )
+       when is_atom(name) do
+    {:., annotations, [{name, annotations, args}, inner]}
+  end
+
+  # .foo.baz(1, 2)
   defp combine_ime_pair({:., annotations, [nil, part]}, inner) do
     {:., annotations, [nil, {:., annotations, [part, inner]}]}
   end
 
-  defp combine_ime_pair({:., annotations, [{:scope, scope}, part]}, inner) do
-    {:., annotations, [scope, {:., annotations, [part, inner]}]}
-  end
-
-  defp combine_ime_pair({:., annotations, _} = outer, inner) do
-    {:., annotations, [outer, inner]}
-  end
-
-  defp combine_ime_pair(outer, inner) do
-    {:., [], [outer, inner]}
-  end
-
-  defp remove_scope({:., annotations, [{:scope, scope}, part]}) do
-    {:., annotations, [scope, part]}
-  end
-
-  defp remove_scope(unscoped) do
-    unscoped
+  # .foo(1, 2).baz(1, 2)
+  defp combine_ime_pair(
+         {name, annotations, _} = ime,
+         {name2, _, _} = ime2
+       )
+       when is_atom(name) and is_atom(name2) do
+    {:., annotations, [ime, ime2]}
   end
 
   defp chain_ime(sections) do
     sections
     |> Enum.reverse()
     |> Enum.reduce(&combine_ime_pair/2)
-    |> remove_scope()
+  end
+end
+```
+
+```elixir
+defmodule Modifiers do
+  import Expressions
+  import Tokens
+  import Ergo.Combinators
+  import Ergo.Terminals
+  import SwiftUI
+
+  def modifier() do
+    sequence(
+      [
+        hoist(sequence([not_lookahead(literal("attr(")), modifier_name()])),
+        enclosed(
+          "(",
+          choice([
+            literals(),
+            lazy(
+              key_value_pairs(
+                choices: [
+                  literals(),
+                  # key_value_list
+                  lazy(ime()),
+                  nested_attribute(),
+                  variable()
+                ]
+              )
+            ),
+            lazy(ime()),
+            lazy(nested_attribute()),
+            lazy(variable())
+          ]),
+          ")"
+        ),
+        choice(
+          [
+            ws(),
+            eoi()
+          ],
+          err: fn ctx ->
+            Ergo.Context.add_error(
+              ctx,
+              :unexpected_non_ws,
+              "Unexpected character |#{String.first(ctx.input)}|"
+            )
+          end
+        )
+      ],
+      label: "modifier"
+    )
+    |> Combinators.transform_with_context(fn old_ctx, new_ctx, [modifier_name, args] ->
+      {String.to_atom(modifier_name), Context.create_annotation(old_ctx, new_ctx), args}
+    end)
+  end
+
+  def nested_attribute() do
+    choice([
+      attr(),
+      choice([
+        literal("attr()"),
+        literal("attr(")
+      ])
+      |> Combinators.halt_if("attr expects a string argument eg attr(\"placeholder\")"),
+      # helper_function(),
+      lazy(modifier()),
+      variable()
+    ])
   end
 end
 ```
@@ -773,12 +954,13 @@ end
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
-alias Ergo
-alias Ergo.Context
-import Ergo.Terminals
-Ergo.parse(Expressions.enclosed("(", Tokens.module_name(), ")"), "(1)")
+# alias Ergo
+# alias Ergo.Context
+# import Ergo.Terminals
 
-# 
+Ergo.parse(Modifiers.modifier(), ~s'font(attr("a"))')
+|> Map.from_struct()
+|> Map.take([:status, :ast])
 ```
 
 ```elixir
