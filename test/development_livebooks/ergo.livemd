@@ -107,7 +107,11 @@ end
 
 defmodule Context do
   def create_annotation(%Ergo.Context{} = old_ctx, %Ergo.Context{} = _new_ctx) do
-    [file: old_ctx.data[:file], line: old_ctx.line, module: old_ctx.data[:module]]
+    if Application.get_env(:live_view_native_stylesheet, :annotations, true) do
+      [file: old_ctx.data[:file], line: old_ctx.line, module: old_ctx.data[:module]]
+    else
+      []
+    end
   end
 end
 ```
@@ -139,11 +143,11 @@ defmodule Tokens do
   @doc """
 
   iex> Ergo.parse(Tokens.nil_(), "nil").ast
-  nil
+  {nil, [], Elixir}
 
   """
   def nil_() do
-    replace(literal("nil"), nil)
+    replace(literal("nil"), {nil, [], Elixir})
   end
 
   def minus() do
@@ -310,9 +314,12 @@ defmodule Tokens do
   end
 
   @doc """
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
   iex> Ergo.parse(Tokens.variable(), "number").ast
   {:number, [file: nil, line: 1, module: nil], Elixir}
 
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> annotations = [{:file, nil}, {:line, 2}, {:module, nil}]
   iex> [Tokens.ignore_whitespace(), Tokens.variable()]
   ...> |> Ergo.Combinators.sequence()
   ...> |> Ergo.parse("\\n number")
@@ -328,6 +335,16 @@ defmodule Tokens do
     end)
   end
 
+  @doc """
+  iex> Ergo.parse(Tokens.literals(), "1").ast
+  1
+
+  iex> Ergo.parse(Tokens.literals(), "1.1").ast
+  1.1
+
+  iex> Ergo.parse(Tokens.literals(), "-1.1").ast
+  -1.1
+  """
   def literals() do
     choice(
       [
@@ -422,10 +439,17 @@ defmodule Expressions do
 
   iex> Ergo.parse(Expressions.comma_separated_list(Tokens.integer()), "1,2,   ").ast
   [1, 2]
+
+  iex> Ergo.parse(Expressions.comma_separated_list(Tokens.literals()), "1,2, 1.3  ").ast
+  [1, 2, 1.3]
+
+  iex> Ergo.parse(Expressions.comma_separated_list(Tokens.literals()), "true, false, nil").ast
+  [true, false, nil]
   """
   def comma_separated_list(parser, opts \\ []) do
     sequence(
       [
+        ignore_whitespace(),
         parser,
         many(
           hoist(
@@ -436,11 +460,15 @@ defmodule Expressions do
               parser
             ])
           )
-        )
+        ),
+        ignore_whitespace()
       ],
       Keyword.merge(
         opts,
-        ast: fn [first, rest] -> [first | rest] end
+        ast: fn
+          [first, rest] -> [first | rest]
+          [[]] -> []
+        end
       )
     )
   end
@@ -523,6 +551,10 @@ end
 ```
 
 ```elixir
+
+```
+
+```elixir
 defmodule Blocks do
   import Tokens
   import Expressions
@@ -531,41 +563,67 @@ defmodule Blocks do
   import Combinators
 
   @doc """
-  iex> Ergo.parse(Tokens.integer(), "12").ast
-  12
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> Ergo.parse(Blocks.blocks(Tokens.integer()), ~s'"class_name" do 12 end\\n"class_name" do 12 end').ast
+  [
+      {["class_name",{:_target, [file: nil, line: 1, module: nil], Elixir}], 12},
+      {["class_name",{:_target, [file: nil, line: 2, module: nil], Elixir}], 12}  
+  ]
 
-  iex> Ergo.parse(Blocks.block_contents(Tokens.integer()), "do 12 end").ast
-  12
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> Ergo.parse(Blocks.blocks(Expressions.comma_separated_list(Tokens.integer())), ~s'"class_name" do 12, 13 end').ast
+  [{["class_name", {:_target, [file: nil, line: 1, module: nil], Elixir}], [12, 13]}]
 
-  # Works with lists
-  iex> import Ergo.Combinators
-  iex> import Tokens
-  iex> integers = many(hoist(sequence([Tokens.integer(), ignore_whitespace()])))
-  iex> Ergo.parse(Blocks.block_contents(integers), "do 12 13 end").ast
-  [12, 13]
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> Ergo.parse(Blocks.blocks(Expressions.comma_separated_list(Tokens.integer())), ~s' "class_name", target: :watchos do 12, 13 end').ast
+  [{["class_name", [file: nil, line: 1, module: nil, target: :watchos]], [12, 13]}]
   """
-  def block_contents(parser) do
+
+  def blocks(parser) do
+    sequence([
+      block(parser),
+      many(
+        hoist(
+          sequence([
+            ignore(whitespace(min: 1)),
+            block(parser)
+          ])
+        )
+      )
+    ])
+    |> transform(fn
+      [first, rest] -> [first | rest]
+    end)
+  end
+
+  @doc """
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> Ergo.parse(Blocks.block(Expressions.comma_separated_list(Tokens.integer())), ~s'"class_name" do 12, 13 end').ast
+  {["class_name", {:_target, [file: nil, line: 1, module: nil], Elixir}], [12, 13]}
+
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
+  iex> Ergo.parse(Blocks.block(Expressions.comma_separated_list(Tokens.integer())), ~s'"class_name", target: :watchos do 12, 13 end').ast
+  {["class_name", [file: nil, line: 1, module: nil, target: :watchos]], [[12, 13]]}
+  """
+
+  def block(parser) do
     sequence(
       [
-        ignore(literal("do")),
         ignore_whitespace(),
-        parser,
+        block_head(),
         ignore_whitespace(),
-        ignore(literal("end"))
-      ]
-      # err: fn ctx ->
-      #   Ergo.Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
-      # end
+        block_contents(parser)
+      ],
+      ast: &List.to_tuple/1
     )
-    |> hoist
   end
 
   @doc """
   iex> Ergo.parse(Blocks.block_head(), ~s'"class_name"').ast
   ["class_name", {:_target, [file: nil, line: 1, module: nil], Elixir}]
 
-  iex> Ergo.parse(Blocks.block_head(), ~s'"class_name", target: :watch').ast
-  ["class_name", {:_target, [file: nil, line: 1, module: nil, target: :watch], Elixir}]
+  iex> Ergo.parse(Blocks.block_head(), ~s'"class_name", target: :watchos').ast
+  ["class_name", [file: nil, line: 1, module: nil, target: :watchos]]
 
   iex> Ergo.parse(Blocks.block_head(), ~s'"class_name" <> variable').ast
   [
@@ -610,16 +668,32 @@ defmodule Blocks do
       ignore_whitespace()
     ])
     |> Combinators.transform_with_context(fn old_ctx, new_ctx, ast ->
-      {class_name, annotation} =
-        case ast do
-          [class_name] ->
-            {class_name, Context.create_annotation(old_ctx, new_ctx)}
+      case ast do
+        [class_name] ->
+          [class_name, {:_target, Context.create_annotation(old_ctx, new_ctx), Elixir}]
 
-          [class_name, block_opts] ->
-            {class_name, Context.create_annotation(old_ctx, new_ctx) ++ block_opts}
-        end
+        [class_name, block_opts] ->
+          [class_name, Context.create_annotation(old_ctx, new_ctx) ++ block_opts]
+      end
+    end)
+  end
 
-      [class_name, {:_target, annotation, Elixir}]
+  @doc """
+  iex> Ergo.parse(Blocks.block_contents(Tokens.integer()), "do 12 end").ast
+  12
+  """
+  def block_contents(parser) do
+    sequence([
+      ignore(literal("do")),
+      ignore_whitespace(),
+      lazy(parser),
+      ignore_whitespace(),
+      ignore(literal("end"))
+    ])
+    # |> hoist
+
+    |> transform(fn
+      [one] -> one
     end)
   end
 end
@@ -686,12 +760,18 @@ defmodule SwiftUI do
           variable()
         ]
       ),
+      lazy(
+        ime()
+        |> transform(fn ast -> {:nested, ast} end, label: "nested_ime")
+        |> wrap()
+      ),
       # nested_attribute
       wrap(variable())
     ]
   end
 
   @doc """
+  iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
   iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
   iex> Ergo.parse(SwiftUI.ime(), ".red").ast
   {:., annotations, [nil, :red]}
@@ -749,6 +829,18 @@ defmodule SwiftUI do
   iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
   iex> Ergo.parse(SwiftUI.ime(), "Foo.baz(color: var)").ast
   {:., annotations, [:Foo, {:baz, annotations, [color: {:var, annotations, Elixir}]}]}
+
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), ".shadow(.thick)").ast
+  {:., annotations, [nil, {:shadow, annotations, [{:., annotations, [nil, :thick]}]}]}
+
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Color.shadow(.thick)").ast
+  {:., annotations, [:Color, {:shadow, annotations, [{:., annotations, [nil, :thick]}]}]}
+
+  iex> annotations = [{:file, nil}, {:line, 1}, {:module, nil}]
+  iex> Ergo.parse(SwiftUI.ime(), "Color.red.shadow(.thick)").ast
+  {:., annotations, [:Color, {:., annotations, [:red, {:shadow, annotations, [{:., annotations, [nil, :thick]}]}]}]}
   """
   def ime() do
     sequence(
@@ -845,16 +937,6 @@ defmodule SwiftUI do
     end)
   end
 
-  defp wrap_initial_ime({:., _, [nil, ast]}, true, annotations),
-    do: [{:., annotations, [nil, ast]}]
-
-  defp wrap_initial_ime(ast, true, annotations), do: [{:., annotations, [nil, ast]}]
-  defp wrap_initial_ime(ast, _, _), do: ast
-
-  defp wrap_ime_in_scope(module_name, ime_ast, annotations) do
-    [{:scope, annotations, String.to_atom(module_name)}, ime_ast]
-  end
-
   defp ime_args() do
     choice([
       ignore(literal("()")),
@@ -867,6 +949,21 @@ defmodule SwiftUI do
       enclosed("(", comma_separated_list(choice(ime_args_choices()), []), ")")
       |> transform(&Enum.concat/1)
     ])
+  end
+
+  defp wrap_initial_ime({:., _, [nil, ast]}, true, annotations),
+    do: [{:., annotations, [nil, ast]}]
+
+  defp wrap_initial_ime(ast, true, annotations), do: [{:., annotations, [nil, ast]}]
+  defp wrap_initial_ime(ast, _, _), do: ast
+
+  defp wrap_ime_in_scope(module_name, ime_ast, annotations) do
+    [{:scope, annotations, String.to_atom(module_name)}, ime_ast]
+  end
+
+  # .foo.baz(.red)
+  defp combine_ime_pair(outer, {prefix, annotations, [nested: args]}) do
+    combine_ime_pair(outer, {prefix, annotations, [args]})
   end
 
   # Foo.baz
@@ -915,6 +1012,10 @@ defmodule SwiftUI do
     {:., annotations, [ime, ime2]}
   end
 
+  defp chain_ime([{:., annotations, [prefix, {name, _, [{:nested, sections}]}]}]) do
+    {:., annotations, [prefix, {name, annotations, [sections]}]}
+  end
+
   defp chain_ime(sections) do
     sections
     |> Enum.reverse()
@@ -932,50 +1033,80 @@ defmodule Modifiers do
   import SwiftUI
   import HelperFunctions
 
+  def modifiers() do
+    modifiers =
+      sequence([
+        ignore_whitespace(),
+        modifier(),
+        sequence([
+          ignore(whitespace(min: 1)),
+          modifier()
+        ])
+        |> hoist()
+        |> many()
+      ])
+      |> transform(fn
+        [first, rest] -> [first | rest]
+      end)
+
+    # end_of_string =
+    #   choice(
+    #     [ws(), eoi(), literal("end")],
+    #     err: fn ctx ->
+    #       Ergo.Context.add_error(
+    #         ctx,
+    #         :unexpected_non_ws,
+    #         "Unexpected character |#{String.first(ctx.input)}|"
+    #       )
+    #     end
+    #   )
+
+    # sequence([
+    #   ignore_whitespace(),
+    #   modifiers
+    # ])
+    # # sequence([modifiers, ignore(end_of_string)])
+    # |> hoist()
+
+    modifiers
+  end
+
   def modifier() do
     sequence(
       [
         hoist(sequence([not_lookahead(literal("attr(")), modifier_name()])),
         enclosed(
           "(",
-          choice([
-            literals(),
-            lazy(
-              key_value_pairs(
-                choices: [
-                  literals(),
-                  # key_value_list
-                  helper_function(),
-                  lazy(ime()),
-                  nested_attribute(),
-                  variable()
-                ]
-              )
-            ),
-            lazy(ime()),
-            lazy(nested_attribute()),
-            lazy(variable())
-          ]),
+          comma_separated_list(
+            choice([
+              literals(),
+              lazy(
+                key_value_pairs(
+                  choices: [
+                    literals(),
+
+                    # key_value_list
+                    helper_function(),
+                    lazy(ime()),
+                    nested_attribute(),
+                    variable()
+                  ]
+                )
+              ),
+              lazy(ime()),
+              lazy(nested_attribute()),
+              lazy(variable()),
+              ignore_whitespace()
+            ])
+          ),
           ")"
-        ),
-        choice(
-          [
-            ws(),
-            eoi()
-          ],
-          err: fn ctx ->
-            Ergo.Context.add_error(
-              ctx,
-              :unexpected_non_ws,
-              "Unexpected character |#{String.first(ctx.input)}|"
-            )
-          end
         )
       ],
       label: "modifier"
     )
-    |> Combinators.transform_with_context(fn old_ctx, new_ctx, [modifier_name, args] ->
-      {String.to_atom(modifier_name), Context.create_annotation(old_ctx, new_ctx), args}
+    |> Combinators.transform_with_context(fn
+      old_ctx, new_ctx, [modifier_name, args] ->
+        {String.to_atom(modifier_name), Context.create_annotation(old_ctx, new_ctx), args}
     end)
   end
 
@@ -1001,10 +1132,34 @@ end
 # alias Ergo
 # alias Ergo.Context
 # import Ergo.Terminals
+import Ergo.Terminals
+import Tokens
+import Ergo.Combinators
 
-Ergo.parse(Modifiers.modifier(), ~s'font(a: to_float(size))')
+# Ergo.parse(Modifiers.modifier(), ~s'font(a: to_float(size))')
+# |> Map.from_struct()
+# |> Map.take([:status, :ast])
+
+Ergo.parse(
+  # Modifiers.modifier(),
+  Modifiers.modifiers(),
+  # "font(color: Color.red.shadow(.thick))"
+  "font(color: Color.red.shadow(.thick))"
+)
 |> Map.from_struct()
 |> Map.take([:status, :ast])
+
+# Ergo.parse(
+#   Blocks.blocks(Modifiers.modifiers()),
+#   # Modifiers.modifiers(),
+#   """
+#           "color-red", target: :watchos do
+#           color(.red)
+#         end
+#   """
+# )
+# |> Map.from_struct()
+# |> Map.take([:status, :ast])
 ```
 
 ```elixir
@@ -1018,6 +1173,383 @@ defmodule Jetpack do
 end
 ```
 
-```elixir
+<!-- livebook:{"reevaluate_automatically":true} -->
 
+```elixir
+ExUnit.start(autorun: false, exclude: [:skip])
+
+defmodule LargeTest2 do
+  use ExUnit.Case
+  # doctest SwiftClass
+  # alias SwiftClass.Helpers.HelperFunctionsTest
+
+  def parse(input) do
+    # Parser.invoke(parser)
+    %Ergo.Context{status: :ok, ast: ast} =
+      Modifiers.modifiers()
+      |> transform(fn
+        [one] -> one
+        not_one -> not_one
+      end)
+      |> Ergo.parse(input)
+
+    ast
+  end
+
+  def parse_class_block(input) do
+    %Ergo.Context{status: :ok, ast: ast} =
+      Ergo.parse(Blocks.blocks(Modifiers.modifiers()), input)
+
+    ast
+  end
+
+  # describe "benchmark" do
+  #   test "parse long stylesheet" do
+  #     file = File.read!("test/helpers/classes.swiftui.style")
+
+  #     for _ <- 1..100 do
+  #       file
+  #       |> SwiftClass.parse_class_block()
+  #     end
+  #   end
+  # end
+
+  describe "parse/1" do
+    Application.put_env(:live_view_native_stylesheet, :annotations, false)
+
+    test "parses modifier function definition" do
+      input = "bold(true)"
+      output = {:bold, [], [true]}
+
+      assert parse(input) == output
+    end
+
+    # test "parses modifier function definition(2)" do
+    #   input = "1(true)"
+
+    #   assert {:error, ":1: error:" <> _, _, _, _, _} =
+    #            SwiftClass.parse(input)
+    # end
+
+    test "parses modifier with multiple arguments" do
+      input = "background(\"foo\", \"bar\")"
+      output = {:background, [], ["foo", "bar"]}
+
+      assert parse(input) == output
+
+      # space at start and end
+      input = "background( \"foo\", \"bar\" )"
+      assert parse(input) == output
+
+      # space at start only
+      input = "background( \"foo\", \"bar\")"
+      assert parse(input) == output
+
+      # space at end only
+      input = "background(\"foo\", \"bar\" )"
+      assert parse(input) == output
+    end
+
+    test "parses single modifier with atom as IME" do
+      input = "font(.largeTitle)"
+
+      output = {:font, [], [{:., [], [nil, :largeTitle]}]}
+
+      assert parse(input) == output
+    end
+
+    test "parses chained IMEs" do
+      input = "font(color: Color.red)"
+
+      output = {:font, [], [[color: {:., [], [:Color, :red]}]]}
+
+      assert parse(input) == output
+
+      input = "font(color: Color.red.shadow(.thick))"
+
+      output =
+        {:font, [],
+         [[color: {:., [], [:Color, {:., [], [:red, {:shadow, [], [{:., [], [nil, :thick]}]}]}]}]]}
+
+      assert parse(input) == output
+    end
+
+    test "parses multiple modifiers" do
+      input = "font(.largeTitle) bold(true) italic(true)"
+
+      output = [
+        {:font, [], [{:., [], [nil, :largeTitle]}]},
+        {:bold, [], [true]},
+        {:italic, [], [true]}
+      ]
+
+      assert parse(input) == output
+    end
+
+    test "parses complex modifier chains" do
+      input = "color(color: .foo.bar.baz(1, 2).qux)"
+
+      output =
+        {:color, [],
+         [
+           [
+             color:
+               {:., [],
+                [nil, {:., [], [:foo, {:., [], [:bar, {:., [], [{:baz, [], [1, 2]}, :qux]}]}]}]}
+           ]
+         ]}
+
+      assert parse(input) == output
+    end
+
+    test "parses multiline" do
+      input = """
+      font(.largeTitle)
+      bold(true)
+      italic(true)
+      """
+
+      output = [
+        {:font, [], [{:., [], [nil, :largeTitle]}]},
+        {:bold, [], [true]},
+        {:italic, [], [true]}
+      ]
+
+      assert parse(input) == output
+    end
+
+    test "parses string literal value type" do
+      input = "foo(\"bar\")"
+      output = {:foo, [], ["bar"]}
+
+      assert parse(input) == output
+    end
+
+    test "parses numerical types" do
+      input = "foo(1, -1, 1.1)"
+      output = {:foo, [], [1, -1, 1.1]}
+
+      assert parse(input) == output
+    end
+
+    test "parses key/value pairs" do
+      input = ~s|foo(bar: "baz", qux: .quux)|
+      output = {:foo, [], [[bar: "baz", qux: {:., [], [nil, :quux]}]]}
+
+      assert parse(input) == output
+    end
+
+    test "parses bool and nil values" do
+      input = "foo(true, false, nil)"
+      output = {:foo, [], [true, false, nil]}
+
+      assert parse(input) == output
+    end
+
+    test "parses Implicit Member Expressions" do
+      input = "color(.red)"
+      output = {:color, [], [{:., [], [nil, :red]}]}
+
+      assert parse(input) == output
+    end
+
+    test "parses nested function calls" do
+      input = ~s|foo(bar("baz"))|
+      output = {:foo, [], [{:bar, [], ["baz"]}]}
+
+      assert parse(input) == output
+    end
+
+    test "parses attr value references" do
+      input = ~s|foo(attr("bar"))|
+      output = {:foo, [], [{:__attr__, [], "bar"}]}
+
+      assert parse(input) == output
+    end
+  end
+
+  describe "class block parser" do
+    test "parses a simple block" do
+      input = """
+      "red-header" do
+        color(.red)
+        font(.largeTitle)
+      end
+      """
+
+      output = [
+        {
+          ["red-header", {:_target, [], Elixir}],
+          [
+            {:color, [], [{:., [], [nil, :red]}]},
+            {:font, [], [{:., [], [nil, :largeTitle]}]}
+          ]
+        }
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "parses a complex block" do
+      input = """
+      "color-" <> color_name do
+        foo(true)
+        color(color_name)
+        bar(false)
+      end
+      """
+
+      output = [
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]],
+            ["color-", {:color_name, [], Elixir}]},
+           {:_target, [], Elixir}
+         ],
+         [
+           {:foo, [], [true]},
+           {:color, [], [{:color_name, [], Elixir}]},
+           {:bar, [], [false]}
+         ]}
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "parses a complex block (2)" do
+      input = """
+      "color-" <> color do
+        color(color)
+      end
+      """
+
+      output = [
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]], ["color-", {:color, [], Elixir}]},
+           {:_target, [], Elixir}
+         ], [{:color, [], [{:color, [], Elixir}]}]}
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "parses multiple blocks" do
+      input = """
+      "color-" <> color_name do
+        foo(true)
+        color(color_name)
+        bar(false)
+      end
+
+      "color-red" do
+        color(.red)
+      end
+      """
+
+      output = [
+        {[
+           {:<>, [context: Elixir, imports: [{2, Kernel}]],
+            ["color-", {:color_name, [], Elixir}]},
+           {:_target, [], Elixir}
+         ],
+         [
+           {:foo, [], [true]},
+           {:color, [], [{:color_name, [], Elixir}]},
+           {:bar, [], [false]}
+         ]},
+        {
+          ["color-red", {:_target, [], Elixir}],
+          [{:color, [], [{:., [], [nil, :red]}]}]
+        }
+      ]
+
+      assert parse_class_block(input) == output
+    end
+
+    test "can take optional target in definition" do
+      input = """
+        "color-red", target: :watchos do
+          color(.red)
+        end
+      """
+
+      output = [
+        {
+          ["color-red", [target: :watchos]],
+          [{:color, [], [{:., [], [nil, :red]}]}]
+        }
+      ]
+
+      assert parse_class_block(input) == output
+    end
+  end
+
+  describe "helper functions" do
+    test "to_atom" do
+      input = "buttonStyle(style: to_atom(style))"
+
+      output = {:buttonStyle, [], [[style: {Elixir, [], {:to_atom, [], [{:style, [], Elixir}]}}]]}
+
+      assert parse(input) == output
+    end
+
+    test "to_integer" do
+      input = "frame(height: to_integer(height))"
+
+      output = {:frame, [], [[height: {Elixir, [], {:to_integer, [], [{:height, [], Elixir}]}}]]}
+
+      assert parse(input) == output
+    end
+
+    test "to_float" do
+      input = "kerning(kerning: to_float(kerning))"
+
+      output =
+        {:kerning, [], [[kerning: {Elixir, [], {:to_float, [], [{:kerning, [], Elixir}]}}]]}
+
+      assert parse(input) == output
+    end
+
+    test "to_boolean" do
+      input = "hidden(to_boolean(is_hidden))"
+
+      output = {:hidden, [], [{Elixir, [], {:to_boolean, [], [{:is_hidden, [], Elixir}]}}]}
+
+      assert parse(input) == output
+    end
+
+    test "camelize" do
+      input = "font(family: camelize(family))"
+
+      output = {:font, [], [[family: {Elixir, [], {:camelize, [], [{:family, [], Elixir}]}}]]}
+
+      assert parse(input) == output
+    end
+
+    test "underscore" do
+      input = "font(family: underscore(family))"
+
+      output = {:font, [], [[family: {Elixir, [], {:underscore, [], [{:family, [], Elixir}]}}]]}
+
+      assert parse(input) == output
+    end
+
+    # test "additional helper function names can be provided" do
+    #   input = "to_ime(family)"
+
+    #   output = {Elixir, [], {:to_ime, [], [{:family, [], Elixir}]}}
+
+    #   assert {:ok, [result], _, _, _, _} = HelperFunctionsTest.helper_functions(input)
+    #   assert result == output
+    # end
+
+    # test "can't parse unknown helper functions" do
+    #   input = "to_unknown(family)"
+
+    #   assert {:error, "expected a 1-arity helper function (to_atom, " <> _, _, _, _, _} =
+    #            HelperFunctionsTest.helper_functions(input)
+    # end
+  end
+end
+
+ExUnit.run()
 ```
