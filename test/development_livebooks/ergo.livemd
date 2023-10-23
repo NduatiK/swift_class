@@ -408,6 +408,9 @@ defmodule Expressions do
   iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "()").ast
   Ergo.Nil
 
+  iex> Ergo.parse(Expressions.enclosed("(", Ergo.Combinators.optional(Tokens.module_name()),")"), "()").ast
+  Ergo.Nil
+
   iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "Color")
   iex> {:error, [{error_id, _, error_message}|_]} = ctx.status
   iex> {ctx.ast, {error_id, error_message}}
@@ -434,6 +437,8 @@ defmodule Expressions do
   #
 
   @doc """
+  iex> Ergo.parse(Expressions.comma_separated_list(Tokens.integer()), "1,2,   3").ast
+  [1, 2, 3]
   iex> Ergo.parse(Expressions.comma_separated_list(Tokens.integer()), "1,2,   3").ast
   [1, 2, 3]
 
@@ -1034,73 +1039,45 @@ defmodule Modifiers do
   import HelperFunctions
 
   def modifiers() do
-    modifiers =
+    more_modifiers =
       sequence([
-        ignore_whitespace(),
-        modifier(),
-        sequence([
-          ignore(whitespace(min: 1)),
-          modifier()
-        ])
-        |> hoist()
-        |> many()
+        ignore(whitespace(min: 1)),
+        modifier(true)
       ])
-      |> transform(fn
-        [first, rest] -> [first | rest]
-      end)
+      |> hoist()
+      |> many()
 
-    # end_of_string =
-    #   choice(
-    #     [ws(), eoi(), literal("end")],
-    #     err: fn ctx ->
-    #       Ergo.Context.add_error(
-    #         ctx,
-    #         :unexpected_non_ws,
-    #         "Unexpected character |#{String.first(ctx.input)}|"
-    #       )
-    #     end
-    #   )
-
-    # sequence([
-    #   ignore_whitespace(),
-    #   modifiers
-    # ])
-    # # sequence([modifiers, ignore(end_of_string)])
-    # |> hoist()
-
-    modifiers
-  end
-
-  def modifier() do
     sequence(
       [
-        hoist(sequence([not_lookahead(literal("attr(")), modifier_name()])),
-        enclosed(
-          "(",
-          comma_separated_list(
-            choice([
-              literals(),
-              lazy(
-                key_value_pairs(
-                  choices: [
-                    literals(),
+        ignore_whitespace(),
+        modifier(true),
+        more_modifiers
+      ],
+      label: "modifiers"
+    )
+    |> transform(fn
+      [first, rest] -> [first | rest]
+    end)
+  end
 
-                    # key_value_list
-                    helper_function(),
-                    lazy(ime()),
-                    nested_attribute(),
-                    variable()
-                  ]
-                )
-              ),
-              lazy(ime()),
-              lazy(nested_attribute()),
-              lazy(variable()),
-              ignore_whitespace()
-            ])
-          ),
-          ")"
-        )
+  def modifier(outermost \\ true) do
+    sequence(
+      [
+        hoist(
+          sequence([
+            not_lookahead(literal("attr(")),
+            not_lookahead(sequence([literal("end"), whitespace(min: 1)])),
+            modifier_name()
+          ])
+        ),
+        if outermost do
+          choice([
+            brackets(),
+            brackets_error()
+          ])
+        else
+          brackets()
+        end
       ],
       label: "modifier"
     )
@@ -1108,6 +1085,42 @@ defmodule Modifiers do
       old_ctx, new_ctx, [modifier_name, args] ->
         {String.to_atom(modifier_name), Context.create_annotation(old_ctx, new_ctx), args}
     end)
+  end
+
+  def brackets() do
+    choice([
+      replace(literal("()"), []),
+      enclosed(
+        "(",
+        comma_separated_list(
+          choice([
+            literals(),
+            lazy(
+              key_value_pairs(
+                choices: [
+                  literals(),
+
+                  # key_value_list
+                  helper_function(),
+                  lazy(ime()),
+                  nested_attribute(),
+                  variable()
+                ]
+              )
+            ),
+            lazy(ime()),
+            lazy(nested_attribute()),
+            lazy(variable()),
+            ignore_whitespace()
+          ])
+        ),
+        ")"
+      )
+    ])
+  end
+
+  def brackets_error() do
+    Combinators.halt("Expected () or (<modifiers_args>)")
   end
 
   def nested_attribute() do
@@ -1119,7 +1132,7 @@ defmodule Modifiers do
       ])
       |> Combinators.halt("attr expects a string argument eg attr(\"placeholder\")"),
       helper_function(),
-      lazy(modifier()),
+      lazy(modifier(false)),
       variable()
     ])
   end
@@ -1141,25 +1154,23 @@ import Ergo.Combinators
 # |> Map.take([:status, :ast])
 
 Ergo.parse(
-  # Modifiers.modifier(),
-  Modifiers.modifiers(),
-  # "font(color: Color.red.shadow(.thick))"
-  "font(color: Color.red.shadow(.thick))"
+  Modifiers.modifier(),
+  "font"
 )
 |> Map.from_struct()
 |> Map.take([:status, :ast])
+|> IO.inspect()
 
-# Ergo.parse(
-#   Blocks.blocks(Modifiers.modifiers()),
-#   # Modifiers.modifiers(),
-#   """
-#           "color-red", target: :watchos do
-#           color(.red)
-#         end
-#   """
-# )
-# |> Map.from_struct()
-# |> Map.take([:status, :ast])
+Ergo.parse(
+  Blocks.blocks(Modifiers.modifiers()),
+  """
+  "red-header" do
+    font() 
+  end
+  """
+)
+|> Map.from_struct()
+|> Map.take([:status, :ast])
 ```
 
 ```elixir
@@ -1180,7 +1191,6 @@ ExUnit.start(autorun: false, exclude: [:skip])
 
 defmodule LargeTest2 do
   use ExUnit.Case
-  # doctest SwiftClass
   # alias SwiftClass.Helpers.HelperFunctionsTest
 
   def parse(input) do
@@ -1203,6 +1213,7 @@ defmodule LargeTest2 do
     ast
   end
 
+  @tag :skip
   describe "benchmark" do
     test "parse long stylesheet" do
       # Simulate the Parallel.Compiler compiling
@@ -1560,29 +1571,27 @@ end
 ExUnit.run()
 ```
 
+<!-- livebook:{"reevaluate_automatically":true} -->
+
 ```elixir
 inspect = fn input, line ->
   result =
     Modifiers.modifiers()
-    |> transform(fn
-      [one] -> one
-      not_one -> not_one
-    end)
     |> Ergo.parse(input)
 
   case result do
     %Ergo.Context{status: :ok, ast: ast} ->
       IO.puts(inspect(ast))
 
-    %Ergo.Context{status: {:error, errors}} ->
+    %Ergo.Context{status: {_, errors}} ->
       IO.puts(inspect(errors))
   end
 end
 
-inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
+# inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
 
-# inspect.("blue", __ENV__.line)
-# inspect.("1(.red)", __ENV__.line)
+inspect.("blue", __ENV__.line)
+inspect.("1(.red)", __ENV__.line)
 # inspect.("font(Color.largeTitle.)", __ENV__.line)
 # inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
 # inspect.("font(.largeTitle) {", __ENV__.line)
