@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:ergo, "~> 0.9.9"}
+  {:ergo, git: "https://github.com/NduatiK/ergo.git", branch: "nk-add-Ergo.Nil"}
 ])
 ```
 
@@ -143,11 +143,11 @@ defmodule Tokens do
   @doc """
 
   iex> Ergo.parse(Tokens.nil_(), "nil").ast
-  {nil, [], Elixir}
+  nil
 
   """
   def nil_() do
-    replace(literal("nil"), {nil, [], Elixir})
+    replace(literal("nil"), nil)
   end
 
   def minus() do
@@ -231,7 +231,7 @@ defmodule Tokens do
   "_ABC"
 
   iex> Ergo.parse(Tokens.word(), "1").ast
-  nil
+  Ergo.Nil
   """
   def word() do
     sequence(
@@ -252,13 +252,13 @@ defmodule Tokens do
   :abc
 
   iex> Ergo.parse(Tokens.atom(), "abc").ast
-  nil
+  Ergo.Nil
 
   iex> Ergo.parse(Tokens.atom(), ":1").ast
-  nil
+  Ergo.Nil
 
   iex> Ergo.parse(Tokens.atom(), "1").ast
-  nil
+  Ergo.Nil
   """
   def atom() do
     sequence(
@@ -307,7 +307,7 @@ defmodule Tokens do
 
   @doc """
   iex> Ergo.parse(Tokens.ignore_whitespace(), "  ").ast
-  nil
+  Ergo.Nil
   """
   def ignore_whitespace() do
     ignore(optional(whitespace(min: 1)))
@@ -327,7 +327,7 @@ defmodule Tokens do
   [{:number, [file: nil, line: 2, module: nil], Elixir}]
 
   iex> Ergo.parse(Tokens.variable(), "1abc").ast
-  nil
+  Ergo.Nil
   """
   def variable() do
     transform_with_context(word(), fn old_ctx, new_ctx, variable_name ->
@@ -372,7 +372,7 @@ defmodule Tokens do
   "Number"
 
   iex> Ergo.parse(Tokens.module_name(), "number").ast
-  nil
+  Ergo.Nil
   """
   def module_name() do
     sequence(
@@ -406,12 +406,12 @@ defmodule Expressions do
   12
 
   iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "()").ast
-  nil
+  Ergo.Nil
 
   iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "Color")
   iex> {:error, [{error_id, _, error_message}|_]} = ctx.status
   iex> {ctx.ast, {error_id, error_message}}
-  {nil, {:unexpected_token, "Expected #{Tokens.module_name().label}"}}
+  {Ergo.Nil, {:unexpected_token, "Expected #{Tokens.module_name().label}"}}
   """
   def enclosed(open, parser, close) do
     sequence(
@@ -536,7 +536,7 @@ defmodule Expressions do
   {:__attr__, [], "placeholder"}
 
   iex> Ergo.parse(Expressions.attr(), ~s'attr(placeholder)').ast
-  nil
+  Ergo.Nil
   """
   def attr() do
     sequence(
@@ -603,7 +603,7 @@ defmodule Blocks do
 
   iex> Application.put_env(:live_view_native_stylesheet, :annotations, true)
   iex> Ergo.parse(Blocks.block(Expressions.comma_separated_list(Tokens.integer())), ~s'"class_name", target: :watchos do 12, 13 end').ast
-  {["class_name", [file: nil, line: 1, module: nil, target: :watchos]], [[12, 13]]}
+  {["class_name", [file: nil, line: 1, module: nil, target: :watchos]], [12, 13]}
   """
 
   def block(parser) do
@@ -940,7 +940,7 @@ defmodule SwiftUI do
   defp ime_args() do
     choice([
       ignore(literal("()")),
-      hoist(
+      ignore(
         sequence([
           not_lookahead(literal("(")),
           ignore_whitespace()
@@ -1585,4 +1585,8 @@ inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
 # inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
 # # Should point to 2a
 # inspect.("abc(def: 11, b: [lineWidth: a, l: 2a])", __ENV__.line)
+```
+
+```elixir
+List.to_string(["a", "b"])
 ```
