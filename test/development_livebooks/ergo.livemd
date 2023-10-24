@@ -6,12 +6,13 @@ Mix.install([
 ])
 ```
 
-## Section
+## Setup
 
 ```elixir
 defmodule Combinators do
   alias Ergo.Context
   alias Ergo.Parser
+  alias Ergo.Terminals
 
   @doc ~S"""
   The `transform_with_context/2` parser runs a transforming function on the AST of its child parser.
@@ -38,6 +39,64 @@ defmodule Combinators do
         with %Context{status: :ok} = match_ctx <- Parser.invoke(ctx, parser) do
           match_ctx
           |> Context.ast_transform(fn ast -> transformer_fn.(ctx, match_ctx, ast) end)
+        end
+      end,
+      child_info: Parser.child_info_for_telemetry(parser)
+    )
+  end
+
+  @doc ~S"""
+  The `transform_error/2` parser runs a transforming function on the error of its child parser.
+
+  ## Examples
+
+      <!-- # Sum the digits
+      # iex> alias Ergo.Context
+      # iex> import Ergo.{Combinators, Terminals}
+      # iex> digit_to_int = fn d -> List.to_string([d]) |> String.to_integer() end
+      # iex> t_fn = fn ast -> ast |> Enum.map(digit_to_int) |> Enum.sum() end
+      # iex> parser = sequence([digit(), digit(), digit(), digit()]) |> transform(t_fn)
+      # # iex> context = Ergo.parse(parser, "1234")
+      # iex> %Context{status: :ok, ast: 10, index: 4, line: 1, col: 5} = context -->
+  """
+  def transform_error(%Parser{} = parser, transformer_fn, opts \\ [])
+      when is_function(transformer_fn) do
+    label = Keyword.get(opts, :label, "transform_error<#{parser.label}>")
+
+    Parser.combinator(
+      :transform_error,
+      label,
+      fn %Context{} = ctx ->
+        with %Context{status: {atom, [error | other_errors]}} = match_ctx <-
+               Parser.invoke(ctx, parser) do
+          %Context{match_ctx | status: {atom, [transformer_fn.(error) | other_errors]}}
+        end
+      end,
+      child_info: Parser.child_info_for_telemetry(parser)
+    )
+  end
+
+  def transform_error_context(%Parser{} = parser, transformer_fn, opts \\ [])
+      when is_function(transformer_fn) do
+    label = Keyword.get(opts, :label, "transform_error<#{parser.label}>")
+
+    error_parser =
+      Keyword.get(
+        opts,
+        :error_parser,
+        Ergo.Combinators.choice([Terminals.any(), Terminals.literal("")])
+        |> wrap()
+        |> Ergo.Combinators.string()
+      )
+
+    Parser.combinator(
+      :transform_error_context,
+      label,
+      fn %Context{} = ctx ->
+        # with %Context{status: {_not_ok, errors}} = err_ctx <- IO.inspect(Parser.invoke(ctx, parser)) do
+        with %Context{status: {_not_ok, _errors}} = err_ctx <- Parser.invoke(ctx, parser) do
+          error_tokens = Ergo.Parser.invoke(err_ctx, error_parser)
+          transformer_fn.(err_ctx, error_tokens.ast)
         end
       end,
       child_info: Parser.child_info_for_telemetry(parser)
@@ -80,7 +139,7 @@ defmodule Combinators do
       :halt,
       "halt",
       fn %Context{} = ctx ->
-        err_ctx = Context.add_error(ctx, :lookahead_fail, error)
+        err_ctx = Context.add_error(ctx, :halt, error)
         fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
         fatal_ctx
       end
@@ -89,13 +148,47 @@ defmodule Combinators do
 
   def halt(%Parser{} = parser, error, opts \\ []) do
     label = Keyword.get(opts, :label, "halt<#{parser.label}>")
+    filter_ast = Keyword.get(opts, :filter, fn _ -> true end)
 
     Parser.combinator(
       :halt,
       label,
       fn %Context{} = ctx ->
-        with %Context{status: :ok} = _new_ctx <- Parser.invoke(ctx, parser) do
-          err_ctx = Context.add_error(ctx, :lookahead_fail, error)
+        with %Context{status: :ok} = new_ctx <- Parser.invoke(ctx, parser) do
+          if filter_ast.(new_ctx.ast) do
+            err_ctx = Context.add_error(ctx, :halt, error)
+            fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
+            fatal_ctx
+          else
+            new_ctx
+          end
+        end
+      end,
+      child_info: Parser.child_info_for_telemetry(parser)
+    )
+  end
+
+  def halt_with_ctx(to_error) do
+    Parser.combinator(
+      :halt_with_ctx,
+      "halt_with_ctx",
+      fn %Context{} = ctx ->
+        err_ctx = Context.add_error(ctx, :halt, to_error.(ctx))
+        fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
+        fatal_ctx
+      end
+    )
+  end
+
+  def halt_with_ctx(%Parser{} = parser, to_error, opts \\ []) do
+    label = Keyword.get(opts, :label, "halt_with_ctx<#{parser.label}>")
+
+    Parser.combinator(
+      :halt_with_ctx,
+      label,
+      fn %Context{} = ctx ->
+        with %Context{status: {_not_ok, _}} = new_ctx <- Parser.invoke(ctx, parser) do
+          err_ctx = Context.add_error(ctx, :halt, to_error.(new_ctx))
           fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
           fatal_ctx
         end
@@ -105,7 +198,7 @@ defmodule Combinators do
   end
 end
 
-defmodule Context do
+defmodule Custom.Context do
   def create_annotation(%Ergo.Context{} = old_ctx, %Ergo.Context{} = _new_ctx) do
     if Application.get_env(:live_view_native_stylesheet, :annotations, true) do
       [file: old_ctx.data[:file], line: old_ctx.line, module: old_ctx.data[:module]]
@@ -113,8 +206,16 @@ defmodule Context do
       []
     end
   end
+
+  def add_fatal_error(ctx, error_id, error_message) do
+    err_ctx = Ergo.Context.add_error(ctx, error_id, error_message)
+    fatal_ctx = %{err_ctx | status: put_elem(err_ctx.status, 0, :fatal)}
+    fatal_ctx
+  end
 end
 ```
+
+## Combinators
 
 <!-- livebook:{"reevaluate_automatically":true} -->
 
@@ -233,17 +334,19 @@ defmodule Tokens do
   iex> Ergo.parse(Tokens.word(), "1").ast
   Ergo.Nil
   """
-  def word() do
+  def word(opts \\ []) do
     sequence(
       [
         transform(char([?a..?z, ?A..?Z, ?_]), &List.wrap/1),
         many(char([?a..?z, ?A..?Z, ?0..?9, ?_]), min: 0)
       ],
-      ast: fn parts ->
-        parts
-        |> Enum.map(&List.to_string/1)
-        |> Enum.join("")
-      end
+      Keyword.merge(opts,
+        ast: fn parts ->
+          parts
+          |> Enum.map(&List.to_string/1)
+          |> Enum.join("")
+        end
+      )
     )
   end
 
@@ -331,7 +434,7 @@ defmodule Tokens do
   """
   def variable() do
     transform_with_context(word(), fn old_ctx, new_ctx, variable_name ->
-      {String.to_atom(variable_name), Context.create_annotation(old_ctx, new_ctx), Elixir}
+      {String.to_atom(variable_name), Custom.Context.create_annotation(old_ctx, new_ctx), Elixir}
     end)
   end
 
@@ -362,9 +465,17 @@ defmodule Tokens do
   @doc """
   iex> Ergo.parse(Tokens.modifier_name(), "number").ast
   "number"
+
+  iex> result = Ergo.parse(Tokens.modifier_name(), "1").status
+  iex> match?({:error, [{:unexpected_char, {1, 1}, "A modifier must start " <> _ }]}, result)
+  true
   """
   def modifier_name() do
-    word()
+    word(label: "modifier")
+    |> transform_error(fn {error_id, {line, col}, _message} ->
+      {error_id, {line, col},
+       "A modifier must start with a lowercase letter and can only contain [A..Z, a..z, _, 1..9]"}
+    end)
   end
 
   @doc """
@@ -396,7 +507,6 @@ defmodule Expressions do
   import Tokens
   import Ergo.Terminals
   import Ergo.Combinators
-  alias Ergo.Context
 
   @doc """
   iex> Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "(Color)").ast
@@ -412,27 +522,46 @@ defmodule Expressions do
   Ergo.Nil
 
   iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "Color")
-  iex> {:error, [{error_id, _, error_message}|_]} = ctx.status
+  iex> {:fatal, [{error_id, _, error_message}|_]} = ctx.status
   iex> {ctx.ast, {error_id, error_message}}
-  {Ergo.Nil, {:unexpected_token, "Expected #{Tokens.module_name().label}"}}
+  {Ergo.Nil, {:parser, "Expected a |(|"}}
+
+  iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.module_name(),")"), "(Color")
+  iex> {:fatal, [{error_id, _, error_message}|_]} = ctx.status
+  iex> {ctx.ast, {error_id, error_message}}
+  {Ergo.Nil, {:parser, "Expected a |)| but got ``"}}
+
+  iex> ctx = Ergo.parse(Expressions.enclosed("(", Tokens.literals(),")"), "(1a)")
+  iex> {:fatal, [{error_id, _, error_message}|_]} = ctx.status
+  iex> {ctx.ast, {error_id, error_message}}
+  {Ergo.Nil, {:parser, "Expected a |)| but got `a`"}}
   """
   def enclosed(open, parser, close) do
-    sequence(
-      [
-        ignore(literal(open)),
-        parser,
-        ignore(literal(close))
-      ],
-      err: fn ctx ->
-        with %Context{status: {:error, _}} <- ctx do
-          Context.add_error(ctx, :unexpected_token, "Expected #{parser.label}")
-        end
-      end
-    )
+    sequence([
+      ignore(literal(open))
+      |> Combinators.transform_error_context(fn ctx, error_token ->
+        ctx
+        |> Custom.Context.add_fatal_error(
+          :parser,
+          "Custom: Expected a |(| but got |#{error_token}|"
+        )
+      end),
+      parser,
+      ignore(literal(close))
+      |> Combinators.transform_error_context(fn ctx, error_token ->
+        ctx
+        |> IO.inspect()
+        |> Custom.Context.add_fatal_error(
+          :parser,
+          "Custom: Expected a |)| but got `#{error_token}`"
+        )
+      end)
+    ])
     |> hoist()
   end
 
   #
+
   # Collections
   #
 
@@ -450,6 +579,7 @@ defmodule Expressions do
 
   iex> Ergo.parse(Expressions.comma_separated_list(Tokens.literals()), "true, false, nil").ast
   [true, false, nil]
+
   """
   def comma_separated_list(parser, opts \\ []) do
     sequence(
@@ -660,7 +790,7 @@ defmodule Blocks do
       ])
       |> transform_with_context(fn old_ctx, new_ctx, [static_part, variable_part] ->
         annotation =
-          Context.create_annotation(old_ctx, new_ctx) ++
+          Custom.Context.create_annotation(old_ctx, new_ctx) ++
             [context: Elixir, imports: [{2, Kernel}]]
 
         {:<>, annotation, [static_part, variable_part]}
@@ -675,10 +805,10 @@ defmodule Blocks do
     |> Combinators.transform_with_context(fn old_ctx, new_ctx, ast ->
       case ast do
         [class_name] ->
-          [class_name, {:_target, Context.create_annotation(old_ctx, new_ctx), Elixir}]
+          [class_name, {:_target, Custom.Context.create_annotation(old_ctx, new_ctx), Elixir}]
 
         [class_name, block_opts] ->
-          [class_name, Context.create_annotation(old_ctx, new_ctx) ++ block_opts]
+          [class_name, Custom.Context.create_annotation(old_ctx, new_ctx) ++ block_opts]
       end
     end)
   end
@@ -738,12 +868,14 @@ defmodule HelperFunctions do
       enclosed("(", variable(), ")")
     ])
     |> transform_with_context(fn old_ctx, new_ctx, [function_name | args] ->
-      annotation = Context.create_annotation(old_ctx, new_ctx)
+      annotation = Custom.Context.create_annotation(old_ctx, new_ctx)
       {Elixir, annotation, {function_name, annotation, args}}
     end)
   end
 end
 ```
+
+## Custom
 
 ```elixir
 defmodule SwiftUI do
@@ -848,22 +980,25 @@ defmodule SwiftUI do
   {:., annotations, [:Color, {:., annotations, [:red, {:shadow, annotations, [{:., annotations, [nil, :thick]}]}]}]}
   """
   def ime() do
-    sequence(
-      [
+    first_part =
+      choice([
+        scoped_ime(),
+        ime_helper_function(true),
+        dotted_ime(true)
+      ])
+
+    chain =
+      many(
         choice([
-          scoped_ime(),
-          ime_helper_function(true),
-          dotted_ime(true)
-        ]),
-        many(
-          choice([
-            # <...>.to_ime(color)
-            ime_helper_function(false),
-            # <...>.red
-            dotted_ime(false)
-          ])
-        )
-      ],
+          # <...>.to_ime(color)
+          ime_helper_function(false),
+          # <...>.red
+          dotted_ime(false)
+        ])
+      )
+
+    sequence(
+      [first_part, chain],
       ast: fn [first, rest] -> first ++ rest end,
       label: "ime"
     )
@@ -880,7 +1015,7 @@ defmodule SwiftUI do
       label: "dotted_ime"
     )
     |> transform_with_context(fn old_ctx, new_ctx, ast ->
-      annotation = Context.create_annotation(old_ctx, new_ctx)
+      annotation = Custom.Context.create_annotation(old_ctx, new_ctx)
 
       ime_ast =
         case ast do
@@ -907,7 +1042,7 @@ defmodule SwiftUI do
       label: "scoped_ime"
     )
     |> transform_with_context(fn old_ctx, new_ctx, [module_name, ime_helper_function_ast] ->
-      annotation = Context.create_annotation(old_ctx, new_ctx)
+      annotation = Custom.Context.create_annotation(old_ctx, new_ctx)
       wrap_ime_in_scope(module_name, ime_helper_function_ast, annotation)
     end)
   end
@@ -932,7 +1067,7 @@ defmodule SwiftUI do
       label: "ime_helper_function"
     )
     |> transform_with_context(fn old_ctx, new_ctx, [variable] ->
-      annotations = Context.create_annotation(old_ctx, new_ctx)
+      annotations = Custom.Context.create_annotation(old_ctx, new_ctx)
 
       wrap_initial_ime(
         {Elixir, annotations, {:to_ime, annotations, [variable]}},
@@ -1073,7 +1208,7 @@ defmodule Modifiers do
         if outermost do
           choice([
             brackets(),
-            brackets_error()
+            invalid_brackets_error()
           ])
         else
           brackets()
@@ -1083,7 +1218,7 @@ defmodule Modifiers do
     )
     |> Combinators.transform_with_context(fn
       old_ctx, new_ctx, [modifier_name, args] ->
-        {String.to_atom(modifier_name), Context.create_annotation(old_ctx, new_ctx), args}
+        {String.to_atom(modifier_name), Custom.Context.create_annotation(old_ctx, new_ctx), args}
     end)
   end
 
@@ -1110,16 +1245,24 @@ defmodule Modifiers do
             ),
             lazy(ime()),
             lazy(nested_attribute()),
-            lazy(variable()),
-            ignore_whitespace()
+            lazy(variable())
           ])
+          |> invalid_brackets_arg_error()
         ),
         ")"
       )
     ])
   end
 
-  def brackets_error() do
+  def invalid_brackets_arg_error(parser) do
+    Combinators.halt_with_ctx(parser, fn ctx ->
+      IO.inspect(ctx, label: "halt_with_ctx")
+
+      "Expected () or (<modifiers_args>)"
+    end)
+  end
+
+  def invalid_brackets_error() do
     Combinators.halt("Expected () or (<modifiers_args>)")
   end
 
@@ -1139,6 +1282,26 @@ defmodule Modifiers do
 end
 ```
 
+```elixir
+# alias Ergo
+# alias Ergo.Context
+import Ergo.Terminals
+import Tokens
+import Ergo.Combinators
+import Expressions
+import Combinators
+
+# enclosed(
+#   "(",
+# comma_separated_list(literals()),
+#   ")"
+# )
+Modifiers.modifier()
+|> Ergo.parse("blue(1a")
+|> Map.from_struct()
+|> Map.take([:status, :ast])
+```
+
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
@@ -1148,29 +1311,55 @@ end
 import Ergo.Terminals
 import Tokens
 import Ergo.Combinators
-
 # Ergo.parse(Modifiers.modifier(), ~s'font(a: to_float(size))')
 # |> Map.from_struct()
 # |> Map.take([:status, :ast])
 
-Ergo.parse(
-  Modifiers.modifier(),
-  "font"
-)
-|> Map.from_struct()
-|> Map.take([:status, :ast])
-|> IO.inspect()
+# Ergo.parse(
+#   Modifiers.modifier(),
+#   "font"
+# )
+# |> Map.from_struct()
+# |> Map.take([:status, :ast])
+# |> IO.inspect()
 
 Ergo.parse(
   Blocks.blocks(Modifiers.modifiers()),
   """
   "red-header" do
-    font() 
+    font(1, .red.) 
   end
   """
 )
 |> Map.from_struct()
-|> Map.take([:status, :ast])
+|> Map.take([:status, :ast, :input])
+
+inspect = fn input, line ->
+  result =
+    Modifiers.modifiers()
+    |> Ergo.parse(input)
+
+  case result do
+    %Ergo.Context{status: :ok, ast: ast} ->
+      IO.puts(inspect(ast))
+
+    %Ergo.Context{status: {_, errors}} ->
+      IO.puts(inspect(errors))
+  end
+end
+
+# inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
+
+inspect.("blue", __ENV__.line)
+inspect.("1(.red)", __ENV__.line)
+inspect.("font(Color.largeTitle.)", __ENV__.line)
+# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
+# inspect.("font(.largeTitle) {", __ENV__.line)
+
+# inspect.("font(.)))red)", __ENV__.line)
+# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
+# # Should point to 2a
+# inspect.("abc(def: 11, b: [lineWidth: a, l: 2a])", __ENV__.line)
 ```
 
 ```elixir
@@ -1574,32 +1763,7 @@ ExUnit.run()
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
-inspect = fn input, line ->
-  result =
-    Modifiers.modifiers()
-    |> Ergo.parse(input)
 
-  case result do
-    %Ergo.Context{status: :ok, ast: ast} ->
-      IO.puts(inspect(ast))
-
-    %Ergo.Context{status: {_, errors}} ->
-      IO.puts(inspect(errors))
-  end
-end
-
-# inspect.("abc(def: 11, b: [lineWidth a, l: 2a]", __ENV__.line)
-
-inspect.("blue", __ENV__.line)
-inspect.("1(.red)", __ENV__.line)
-# inspect.("font(Color.largeTitle.)", __ENV__.line)
-# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
-# inspect.("font(.largeTitle) {", __ENV__.line)
-
-# inspect.("font(.)))red)", __ENV__.line)
-# inspect.("abc(def: 11, b: [lineWidth: 1lineWidth])", __ENV__.line)
-# # Should point to 2a
-# inspect.("abc(def: 11, b: [lineWidth: a, l: 2a])", __ENV__.line)
 ```
 
 ```elixir
