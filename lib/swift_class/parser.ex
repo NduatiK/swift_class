@@ -129,7 +129,8 @@ defmodule SwiftClass.Parser do
   def error_from_result(result) do
     case result do
       {_, _output, rest, %{context: %Context{errors: [_ | _]} = context}, c, d} ->
-        {:error, SwiftClass.Parser.Error.context_to_error_message(context), rest, context, c, d}
+        {message, position, byte_offset} = SwiftClass.Parser.Error.context_to_error_message(context)
+        {:error, message, rest, context, position, byte_offset}
 
       result ->
         result

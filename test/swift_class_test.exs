@@ -4,24 +4,23 @@ defmodule SwiftClassTest do
   alias SwiftClass.Helpers.HelperFunctionsTest
 
   def parse(input) do
-    {:ok, output, _, _, _, _} = SwiftClass.parse(input, content: [file: __ENV__.file])
-
-    output
+    SwiftClass.parse(input, content: [file: __ENV__.file])
   end
 
-  def parse_class_block(input) do
-    {:ok, output, _, _, _, _} = SwiftClass.parse_class_block(input)
-
-    output
+  def parse2(input) do
+    SwiftClass.parse(input, content: [file: __ENV__.file])
   end
+
+ 
 
   describe "benchmark" do
     test "parse long stylesheet" do
-      file = File.read!("test/helpers/classes.swiftui.style")
+      file_name = "test/helpers/classes.swiftui.style"
+      file = File.read!(file_name)
 
       for _ <- 1..100 do
         file
-        |> SwiftClass.parse_class_block()
+        |> SwiftClass.parse_class_block(file: file_name)
       end
     end
   end
@@ -32,13 +31,6 @@ defmodule SwiftClassTest do
       output = {:bold, [], [true]}
 
       assert parse(input) == output
-    end
-
-    test "parses modifier function definition(2)" do
-      input = "1(true)"
-
-      assert {:error, ":1: error:" <> _, _, _, _, _} =
-               SwiftClass.parse(input)
     end
 
     test "parses modifier with multiple arguments" do
@@ -197,7 +189,7 @@ defmodule SwiftClassTest do
         }
       ]
 
-      assert parse_class_block(input) == output
+      assert SwiftClass.parse_class_block(input) == output
     end
 
     test "parses a complex block" do
@@ -222,7 +214,7 @@ defmodule SwiftClassTest do
          ]}
       ]
 
-      assert parse_class_block(input) == output
+      assert SwiftClass.parse_class_block(input) == output
     end
 
     test "parses a complex block (2)" do
@@ -239,7 +231,7 @@ defmodule SwiftClassTest do
          ], [{:color, [], [{:color, [], Elixir}]}]}
       ]
 
-      assert parse_class_block(input) == output
+      assert SwiftClass.parse_class_block(input) == output
     end
 
     test "parses multiple blocks" do
@@ -272,7 +264,7 @@ defmodule SwiftClassTest do
         }
       ]
 
-      assert parse_class_block(input) == output
+      assert SwiftClass.parse_class_block(input) == output
     end
 
     test "can take optional target in definition" do
@@ -289,7 +281,7 @@ defmodule SwiftClassTest do
         }
       ]
 
-      assert parse_class_block(input) == output
+      assert SwiftClass.parse_class_block(input) == output
     end
   end
 
@@ -357,6 +349,99 @@ defmodule SwiftClassTest do
 
       assert {:error, "expected a 1-arity helper function (to_atom, " <> _, _, _, _, _} =
                HelperFunctionsTest.helper_functions(input)
+    end
+  end
+
+  describe "error reporting" do
+    setup do
+      # Disable ANSI so we don't have to worry about colors
+      Application.put_env(:elixir, :ansi_enabled, false)
+      on_exit(fn -> Application.put_env(:elixir, :ansi_enabled, true) end)
+    end
+
+    test "ANSI is off" do
+      assert "message" == IO.iodata_to_binary(IO.ANSI.format([:blue, "message"]))
+    end
+
+    test "modifier without brackets" do
+      input = "blue"
+
+      # assert_raise SyntaxError, ~r/^today's lucky number is 0\.\d+!$/, fn ->
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+
+      assert """
+             Unsupported input:
+               |
+             1 | blue_
+               |
+               |
+             """ <> _ = error.description
+    end
+
+    test "invalid modifier name" do
+      input = "1(.red)"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "invalid modifier argument" do
+      input = "font(Color.largeTitle.)"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "invalid modifier argument2" do
+      input = "abc(11, 2a)"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "invalid keyword pair: missing colon" do
+      input = "abc(def: 11, b: [lineWidth a, l: 2a]"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "invalid keyword pair: invalid value" do
+      input = "abc(def: 11, b: [lineWidth: 1lineWidth])"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "unexpected trailing character" do
+      input = "font(.largeTitle) {"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
+    end
+
+    test "unexpected bracket" do
+      input = "font(.)red)"
+
+      error =
+        assert_raise SyntaxError, fn ->
+          parse2(input)
+        end
     end
   end
 end

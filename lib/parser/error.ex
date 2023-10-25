@@ -141,8 +141,7 @@ defmodule SwiftClass.Parser.Error do
         ""
       end
 
-    """
-    #{context.file || ""}:#{source_line}: error:
+    message = """
     Unsupported input:
     #{line_spacer} |
     #{lines}
@@ -150,6 +149,7 @@ defmodule SwiftClass.Parser.Error do
 
     #{error_message}#{maybe_but_got}
     """
-    |> String.trim()
+
+    {message, {source_line, 0}, error.byte_offset}
   end
 end

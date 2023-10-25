@@ -2,7 +2,10 @@
 
 ```elixir
 Mix.install([
-  {:ergo, git: "https://github.com/NduatiK/ergo.git", branch: "nk-add-Ergo.Nil"}
+  {:ergo, git: "https://github.com/NduatiK/ergo.git", branch: "nk-add-Ergo.Nil"},
+  {:kino, "~> 0.7.0"},
+  {:eflambe_live, "~> 0.1.0"},
+  {:req, "~> 0.4.4"}
 ])
 ```
 
@@ -433,8 +436,12 @@ defmodule Tokens do
   Ergo.Nil
   """
   def variable() do
-    transform_with_context(word(), fn old_ctx, new_ctx, variable_name ->
+    word()
+    |> transform_with_context(fn old_ctx, new_ctx, variable_name ->
       {String.to_atom(variable_name), Custom.Context.create_annotation(old_ctx, new_ctx), Elixir}
+    end)
+    |> transform_error(fn {error_id, {line, col}, _message} ->
+      {:parser_error, {line, col}, "A variable must start with a ..."}
     end)
   end
 
@@ -541,20 +548,14 @@ defmodule Expressions do
       ignore(literal(open))
       |> Combinators.transform_error_context(fn ctx, error_token ->
         ctx
-        |> Custom.Context.add_fatal_error(
-          :parser,
-          "Custom: Expected a |(| but got |#{error_token}|"
-        )
+        |> Ergo.Context.add_error(:parser, "Custom: Expected a |(| but got |#{error_token}|")
       end),
       parser,
       ignore(literal(close))
       |> Combinators.transform_error_context(fn ctx, error_token ->
         ctx
-        |> IO.inspect()
-        |> Custom.Context.add_fatal_error(
-          :parser,
-          "Custom: Expected a |)| but got `#{error_token}`"
-        )
+        # |> IO.inspect()
+        # |> IO.inspect(        |> Ergo.Context.add_error(:parser, "Custom: Expected a |)| but got `#{error_token}`")
       end)
     ])
     |> hoist()
@@ -1207,11 +1208,11 @@ defmodule Modifiers do
         ),
         if outermost do
           choice([
-            brackets(),
+            brackets(outermost),
             invalid_brackets_error()
           ])
         else
-          brackets()
+          brackets(outermost)
         end
       ],
       label: "modifier"
@@ -1222,7 +1223,7 @@ defmodule Modifiers do
     end)
   end
 
-  def brackets() do
+  def brackets(outermost \\ true) do
     choice([
       replace(literal("()"), []),
       enclosed(
@@ -1245,21 +1246,25 @@ defmodule Modifiers do
             ),
             lazy(ime()),
             lazy(nested_attribute()),
-            lazy(variable())
+            variable()
           ])
-          |> invalid_brackets_arg_error()
+          |> invalid_brackets_arg_error(outermost)
         ),
         ")"
       )
     ])
   end
 
-  def invalid_brackets_arg_error(parser) do
-    Combinators.halt_with_ctx(parser, fn ctx ->
-      IO.inspect(ctx, label: "halt_with_ctx")
+  def invalid_brackets_arg_error(parser, outermost) do
+    if outermost do
+      Combinators.halt_with_ctx(parser, fn ctx ->
+        # IO.inspect(ctx, label:halt_with_ctx")
 
-      "Expected () or (<modifiers_args>)"
-    end)
+        "-Expected () or (<modifiers_args>)"
+      end)
+    else
+      parser
+    end
   end
 
   def invalid_brackets_error() do
@@ -1275,8 +1280,7 @@ defmodule Modifiers do
       ])
       |> Combinators.halt("attr expects a string argument eg attr(\"placeholder\")"),
       helper_function(),
-      lazy(modifier(false)),
-      variable()
+      lazy(modifier(false))
     ])
   end
 end
@@ -1297,7 +1301,10 @@ import Combinators
 #   ")"
 # )
 Modifiers.modifier()
-|> Ergo.parse("blue(1a")
+# |> Ergo.parse("blue(1a")
+|> Ergo.parse("""
+color(color)
+""")
 |> Map.from_struct()
 |> Map.take([:status, :ast])
 ```
@@ -1373,6 +1380,10 @@ defmodule Jetpack do
 end
 ```
 
+```elixir
+
+```
+
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
@@ -1402,21 +1413,26 @@ defmodule LargeTest2 do
     ast
   end
 
-  @tag :skip
   describe "benchmark" do
+    @tag :skip
     test "parse long stylesheet" do
       # Simulate the Parallel.Compiler compiling
       # 100 large files
+      file = File.read!("test/helpers/classes.swiftui.style")
 
-      Task.async_stream(
-        1..100,
-        fn _ ->
-          file = File.read!("test/helpers/classes.swiftui.style")
-          parse_class_block(file)
-        end,
-        ordered: false
-      )
-      |> Stream.run()
+      for _ <- 1..100 do
+        parse_class_block(file)
+      end
+
+      # Task.async_stream(
+      #   # 1..10,
+      #   1..100,
+      #   fn _ ->
+      #     parse_class_block(file)
+      #   end,
+      #   ordered: false
+      # )
+      # |> Stream.run()
     end
   end
 
@@ -1763,9 +1779,25 @@ ExUnit.run()
 <!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
-
+defmodule Perf do
+  def run_benchmark(input) do
+    # for _ <- 1..100 do
+    Ergo.parse(Blocks.blocks(Modifiers.modifiers()), input).ast
+    # end
+  end
+end
 ```
 
 ```elixir
+# EflambeLive.apply({Perf, :run_benchmark, [resp.body]})
+# resp =
+#   Req.get!(
+#     "https://gist.githubusercontent.com/bcardarella/6251f2fae5cbf62803e57449a8931808/raw/06aeec7b1bb6f0d45a730c2b34428fbcafb42a8d/classes.swiftui.exs"
+#   )
 
+file = File.read!("test/helpers/classes.swiftui.style")
+# EflambeLive.apply({Perf, :run_benchmark, [file]})
+# EflambeLive.capture()
+Perf.run_benchmark(file)
+:eflambe.apply({Perf, :run_benchmark, [file]})
 ```

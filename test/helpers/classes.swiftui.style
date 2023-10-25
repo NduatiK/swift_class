@@ -66,10 +66,6 @@ end
   fontWeight(to_atom(weight))
 end
 
-"font-" <> font do
-  font(font: {"system", font})
-end
-
 "line-spacing-" <> line_spacing do
   lineSpacing(to_float(line_spacing))
 end
@@ -96,11 +92,11 @@ end
 end
 
 "background:" <> content do
-  background() { to_atom(content) }
+  background(content: content)
 end
 
 "overlay:" <> content do
-  overlay() { to_atom(content) }
+  overlay(content: content)
 end
 
 "fg-color-" <> fg_color do
@@ -120,19 +116,19 @@ end
 end
 
 "border-" <> border_color do
-  stroke(width: 1, {:Color, to_atom(border_color)})
+  stroke(width: 1, Color.to_ime(border_color))
 end
 
 "border:" <> border_color do
-  stroke(width: 1, {:Color, border_color})
+  stroke(width: 1, Color.to_ime(border_color))
 end
 
 "stroke-" <> stroke_color do
-  stroke(style: [lineWidth: 1], {:Color, to_atom(stroke_color)})
+  stroke(style: [lineWidth: 1], Color.to_ime(stroke_color))
 end
 
 "stroke:" <> stroke_color do
-  stroke(style: [lineWidth: 1], {:Color, stroke_color})
+  stroke(style: [lineWidth: 1], Color.to_ime(stroke_color))
 end
 
 "line-limit-" <> number do
@@ -148,7 +144,7 @@ end
 end
 
 "full-screen-cover:" <> content do
-  fullScreenCover(isPresented: true) { to_atom(content) }
+  fullScreenCover(isPresented: true, content: content)
 end
 
 "image-scale-" <> image_scale do
